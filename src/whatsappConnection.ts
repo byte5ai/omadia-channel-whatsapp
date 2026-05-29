@@ -56,8 +56,11 @@ export class WhatsAppConnection {
   private intentionalClose = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly logger: BaileysLogger;
-  /** Normalised JID of the linked account — used to detect "self-chat". */
+  /** Normalised identity of the linked account — used to detect "self-chat".
+   *  WhatsApp may address chats by phone-number JID (`…@s.whatsapp.net`) OR by
+   *  privacy LID (`…@lid`), so we keep both forms and match either. */
   private ownJid = '';
+  private ownLid = '';
   /** IDs of messages WE sent, so we never treat our own replies as input. */
   private readonly sentIds = new Set<string>();
 
@@ -131,14 +134,16 @@ export class WhatsAppConnection {
 
     if (connection === 'open') {
       const id = this.sock?.user?.id ?? '';
+      const lid = (this.sock?.user as { lid?: string } | undefined)?.lid ?? '';
       this.ownJid = id ? jidNormalizedUser(id) : '';
+      this.ownLid = lid ? jidNormalizedUser(lid) : '';
       patchState(this.deps.state, {
         status: 'connected',
         qrDataUrl: null,
         lastError: null,
         me: { id, ...(this.sock?.user?.name ? { name: this.sock.user.name } : {}) },
       });
-      this.deps.log('info', 'WhatsApp connected', { id });
+      this.deps.log('info', 'WhatsApp connected', { id, ownJid: this.ownJid, ownLid: this.ownLid });
     }
 
     if (connection === 'close') {
@@ -190,11 +195,15 @@ export class WhatsAppConnection {
         // private conversations) nor our own replies (which land fromMe:true in
         // the user's chat). Rule: drop fromMe UNLESS it's the self-chat.
         const fromMe = Boolean(msg.key.fromMe);
-        const isSelfChat = this.ownJid !== '' && jidNormalizedUser(remoteJid) === this.ownJid;
+        const normJid = jidNormalizedUser(remoteJid);
+        const isSelfChat =
+          (this.ownJid !== '' && normJid === this.ownJid) ||
+          (this.ownLid !== '' && normJid === this.ownLid);
         if (fromMe && !isSelfChat) {
           this.deps.log('info', 'WhatsApp inbound skipped: own message in another chat', {
             jid: remoteJid,
             ownJid: this.ownJid,
+            ownLid: this.ownLid,
           });
           continue;
         }
