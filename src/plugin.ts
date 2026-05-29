@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import {
   isNoReply,
   logNoReplyDrop,
+  type ChatAgent,
   type ChannelHandle,
   type CoreApi,
   type IncomingTurn,
@@ -11,7 +12,6 @@ import {
 import type { PluginContext } from '@omadia/plugin-api';
 
 import { createAdminRouter } from './adminRouter.js';
-import { foldStream } from './inbound.js';
 import { renderAnswer } from './renderer.js';
 import { createChannelState } from './state.js';
 import { WhatsAppConnection } from './whatsappConnection.js';
@@ -34,6 +34,17 @@ export async function activate(ctx: PluginContext, core: CoreApi): Promise<Chann
   const ignoreGroups = ctx.config.get<boolean>('ignore_groups') ?? true;
   const allowlist = parseAllowlist(ctx.config.get<string>('allowlist') ?? '');
 
+  // The real orchestrator is published in the service registry as a
+  // ChatAgentBundle under 'chatAgent' — this is how channels actually drive
+  // turns (the CoreApi.handleTurnStream dispatcher is an unwired kernel stub).
+  const chatBundle = ctx.services.get<{ agent: ChatAgent }>('chatAgent');
+  const agent = chatBundle?.agent;
+  if (!agent) {
+    throw new Error(
+      "@omadia/channel-whatsapp: 'chatAgent' service unavailable — the orchestrator plugin must be installed and active",
+    );
+  }
+
   const state = createChannelState();
 
   // `let conn!` so the onMessage closure can reference the instance it is
@@ -47,7 +58,7 @@ export async function activate(ctx: PluginContext, core: CoreApi): Promise<Chann
     deviceName,
     state,
     policy: { ignoreGroups, allowlist },
-    onMessage: (turn) => handleTurn(core, conn, turn),
+    onMessage: (turn) => handleTurn(agent, core, conn, turn),
   });
 
   // QR / status admin UI. web-ui renders this as an iframe (manifest
@@ -83,14 +94,23 @@ export async function activate(ctx: PluginContext, core: CoreApi): Promise<Chann
 }
 
 /** Drive one orchestrator turn and ship the rendered answer back to WhatsApp. */
-async function handleTurn(core: CoreApi, conn: WhatsAppConnection, turn: IncomingTurn): Promise<void> {
+async function handleTurn(
+  agent: ChatAgent,
+  core: CoreApi,
+  conn: WhatsAppConnection,
+  turn: IncomingTurn,
+): Promise<void> {
   try {
-    const folded = await foldStream(core.handleTurnStream(turn));
-    if (isNoReply({ text: folded.answer })) {
+    const answer = await agent.chat({
+      userMessage: turn.text,
+      sessionScope: `whatsapp:${turn.conversationId}`,
+      userId: turn.userRef.id,
+    });
+    if (isNoReply(answer)) {
       logNoReplyDrop(turn.channelId, { conversationId: turn.conversationId });
       return;
     }
-    const text = renderAnswer(folded);
+    const text = renderAnswer(answer);
     if (text.trim().length === 0) return;
     await conn.sendText(turn.conversationId, text);
   } catch (err) {

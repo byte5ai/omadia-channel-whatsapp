@@ -1,32 +1,38 @@
-import type { DiagramAttachment, FollowUpOption, OutgoingFileAttachment, PendingUserChoice } from '@omadia/channel-sdk';
-
-import type { FoldedAnswer } from './inbound.js';
+import type {
+  FollowUpOption,
+  OutgoingAttachment,
+  OutgoingChoiceCard,
+  SemanticAnswer,
+} from '@omadia/channel-sdk';
 
 /**
- * Render the channel-agnostic answer into a single WhatsApp text message.
+ * Render the orchestrator's channel-agnostic {@link SemanticAnswer} into a
+ * single WhatsApp text message.
  *
  * WhatsApp (Baileys) has no Adaptive-Card / inline-keyboard primitive we can
- * rely on, so every richer element degrades to text: choice cards become a
+ * rely on, so every richer element degrades to text: a choice card becomes a
  * "reply with one of these" list, follow-ups become copyable suggestions, and
  * attachments become links. This matches the SDK's documented graceful-
  * degradation contract for connectors without rich UI.
  */
-export function renderAnswer(a: FoldedAnswer): string {
+export function renderAnswer(a: SemanticAnswer): string {
   const parts: string[] = [];
 
-  const body = mdToWhatsApp(a.answer).trim();
+  const body = mdToWhatsApp(a.text).trim();
   if (body) parts.push(body);
 
-  if (a.pendingUserChoice && a.pendingUserChoice.options.length > 0) {
-    parts.push(renderChoice(a.pendingUserChoice));
+  if (a.interactive?.kind === 'choice') {
+    parts.push(renderChoice(a.interactive));
   }
 
-  const links = renderAttachments(a.attachments, a.fileAttachments);
+  const links = renderAttachments(a.attachments);
   if (links) parts.push(links);
 
-  if (a.followUpOptions && a.followUpOptions.length > 0) {
-    parts.push(renderFollowUps(a.followUpOptions));
+  if (a.followUps && a.followUps.length > 0) {
+    parts.push(renderFollowUps(a.followUps));
   }
+
+  if (a.disclaimer) parts.push(`_${a.disclaimer}_`);
 
   return parts.join('\n\n');
 }
@@ -47,7 +53,7 @@ export function mdToWhatsApp(md: string): string {
     .replace(/^#{1,6}\s+(.+)$/gm, '*$1*');
 }
 
-function renderChoice(choice: PendingUserChoice): string {
+function renderChoice(choice: OutgoingChoiceCard): string {
   const lines = [`*${choice.question}*`];
   if (choice.rationale) lines.push(`_${choice.rationale}_`);
   for (const opt of choice.options) lines.push(`• ${opt.label}`);
@@ -61,12 +67,11 @@ function renderFollowUps(followUps: FollowUpOption[]): string {
   return lines.join('\n');
 }
 
-function renderAttachments(
-  images: DiagramAttachment[] | undefined,
-  files: OutgoingFileAttachment[] | undefined,
-): string | undefined {
+function renderAttachments(items: OutgoingAttachment[] | undefined): string | undefined {
   const lines: string[] = [];
-  for (const img of images ?? []) lines.push(`🖼 ${img.altText}: ${img.url}`);
-  for (const file of files ?? []) lines.push(`📎 ${file.altText}: ${file.url}`);
+  for (const a of items ?? []) {
+    const icon = a.kind === 'image' ? '🖼' : '📎';
+    lines.push(`${icon} ${a.altText}: ${a.url}`);
+  }
   return lines.length > 0 ? lines.join('\n') : undefined;
 }
