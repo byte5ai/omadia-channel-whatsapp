@@ -15,7 +15,7 @@ identity:
   kind: "channel"
   domain: "whatsapp"
   name: "WhatsApp"
-  version: "0.1.0"                         # === package.json "version"
+  version: "0.1.1"                         # === package.json "version"
   description: "WhatsApp-Channel via WhatsApp Web (Baileys, QR-Linked-Device). Routet WhatsApp-Chats in den Omadia-Orchestrator."
   authors:
     - name: "byte5 GmbH"

@@ -103,7 +103,19 @@ esbuild build still works because those packages are `external` at runtime.
 
 ---
 
-## Limitations & caveats (v0.1.0)
+## Behaviour
+
+- **ACK reaction.** Every accepted message gets an immediate 👀 reaction
+  (OpenClaw-style) so the sender sees it was picked up before the answer lands.
+- **Who it answers.** Messages from *other* people to the linked account
+  (`fromMe:false`) and the operator's own **self-chat** ("Message Yourself").
+  It deliberately ignores the account's messages in *other* chats and its own
+  replies (id-tracked) — so no reply-loops and no answering your private chats.
+- **Recommended setup:** link a **dedicated** WhatsApp account/number for the
+  bot. Linking a personal account works for self-chat testing but the bot then
+  shares your identity; use `allowlist` to scope which conversations are active.
+
+## Limitations & caveats
 
 - **Text only.** Inbound media and outbound images/files are surfaced as links,
   not media messages. Choice-cards / follow-ups degrade to text prompts.

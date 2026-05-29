@@ -2,6 +2,7 @@ import makeWASocket, {
   DisconnectReason,
   fetchLatestBaileysVersion,
   isJidGroup,
+  jidNormalizedUser,
   makeCacheableSignalKeyStore,
   type ConnectionState,
   type MessageUpsertType,
@@ -38,6 +39,10 @@ export interface WhatsAppConnectionDeps {
 
 const RECONNECT_DELAY_MS = 3_000;
 
+/** Reaction posted on every accepted message — OpenClaw-style — so the user
+ *  sees their message was picked up before the (slower) answer arrives. */
+const ACK_EMOJI = '👀';
+
 /**
  * Owns the long-lived WhatsApp Web (Baileys) socket: connect → emit QR →
  * linked → reconnect-on-drop. Drives the shared {@link ChannelState} so the
@@ -51,6 +56,10 @@ export class WhatsAppConnection {
   private intentionalClose = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly logger: BaileysLogger;
+  /** Normalised JID of the linked account — used to detect "self-chat". */
+  private ownJid = '';
+  /** IDs of messages WE sent, so we never treat our own replies as input. */
+  private readonly sentIds = new Set<string>();
 
   constructor(private readonly deps: WhatsAppConnectionDeps) {
     this.logger = makeBaileysLogger(deps.log);
@@ -121,13 +130,15 @@ export class WhatsAppConnection {
     }
 
     if (connection === 'open') {
+      const id = this.sock?.user?.id ?? '';
+      this.ownJid = id ? jidNormalizedUser(id) : '';
       patchState(this.deps.state, {
         status: 'connected',
         qrDataUrl: null,
         lastError: null,
-        me: { id: this.sock?.user?.id ?? '', ...(this.sock?.user?.name ? { name: this.sock.user.name } : {}) },
+        me: { id, ...(this.sock?.user?.name ? { name: this.sock.user.name } : {}) },
       });
-      this.deps.log('info', 'WhatsApp connected', { id: this.sock?.user?.id });
+      this.deps.log('info', 'WhatsApp connected', { id });
     }
 
     if (connection === 'close') {
@@ -148,12 +159,27 @@ export class WhatsAppConnection {
   }
 
   private async onMessagesUpsert(arg: { messages: WAMessage[]; type: MessageUpsertType }): Promise<void> {
+    // Only live messages ('notify'). 'append' = history sync — never answer the
+    // operator's backlog.
     if (arg.type !== 'notify') return;
     for (const msg of arg.messages) {
       try {
-        if (msg.key.fromMe) continue;
         const remoteJid = msg.key.remoteJid ?? '';
         if (!remoteJid || remoteJid === 'status@broadcast') continue;
+
+        // Never react to the echo of our OWN outgoing reply (self-chat loop guard).
+        if (msg.key.id && this.sentIds.has(msg.key.id)) continue;
+
+        // A WhatsApp-Web bot is linked to an account, so the account's OWN
+        // messages are valid input in two cases:
+        //   • self-chat ("Nachricht an mich selbst") — the operator testing/using it,
+        //   • (dedicated account) others write in → those are fromMe:false anyway.
+        // We must still NOT answer the operator's messages in OTHER chats (their
+        // private conversations) nor our own replies (which land fromMe:true in
+        // the user's chat). Rule: drop fromMe UNLESS it's the self-chat.
+        const fromMe = Boolean(msg.key.fromMe);
+        const isSelfChat = this.ownJid !== '' && jidNormalizedUser(remoteJid) === this.ownJid;
+        if (fromMe && !isSelfChat) continue;
 
         const isGroup = isJidGroup(remoteJid) ?? remoteJid.endsWith('@g.us');
         if (isGroup && this.deps.policy.ignoreGroups) continue;
@@ -161,14 +187,20 @@ export class WhatsAppConnection {
         const text = extractText(msg);
         if (!text) continue;
 
+        // Allowlist scopes by conversation partner: the sender in groups, the
+        // chat jid in DMs.
         if (this.deps.policy.allowlist.size > 0) {
-          const senderJid = isGroup ? (msg.key.participant ?? remoteJid) : remoteJid;
-          if (!this.deps.policy.allowlist.has(jidToPhone(senderJid))) {
-            this.deps.log('info', 'dropped WhatsApp message from non-allowlisted sender');
+          const partyJid = isGroup ? (msg.key.participant ?? remoteJid) : remoteJid;
+          if (!this.deps.policy.allowlist.has(jidToPhone(partyJid))) {
+            this.deps.log('info', 'WhatsApp message dropped (not allowlisted)', { jid: remoteJid });
             continue;
           }
         }
 
+        this.deps.log('info', 'WhatsApp message received', { jid: remoteJid, fromMe, isGroup });
+
+        // ACK first (OpenClaw-style) so the user immediately sees it was picked up.
+        void this.sendReaction(remoteJid, msg.key, ACK_EMOJI);
         void this.sendTyping(remoteJid);
         await this.deps.onMessage(buildIncomingTurn(this.deps.channelId, msg, text));
       } catch (err) {
@@ -179,7 +211,30 @@ export class WhatsAppConnection {
 
   async sendText(jid: string, text: string): Promise<void> {
     if (!this.sock) throw new Error('WhatsApp socket not connected');
-    await this.sock.sendMessage(jid, { text });
+    const sent = await this.sock.sendMessage(jid, { text });
+    if (sent?.key?.id) this.recordSent(sent.key.id);
+  }
+
+  /** Post an emoji reaction on a message (ACK). Best-effort — never throws. */
+  async sendReaction(jid: string, key: WAMessage['key'], emoji: string): Promise<void> {
+    try {
+      const sent = await this.sock?.sendMessage(jid, { react: { text: emoji, key } });
+      if (sent?.key?.id) this.recordSent(sent.key.id);
+    } catch (err) {
+      this.deps.log('warn', 'failed to send WhatsApp reaction', { error: (err as Error).message });
+    }
+  }
+
+  /** Remember an id we emitted so its `messages.upsert` echo is ignored. Bounded. */
+  private recordSent(id: string): void {
+    this.sentIds.add(id);
+    if (this.sentIds.size > 500) {
+      let drop = 100;
+      for (const old of this.sentIds) {
+        this.sentIds.delete(old);
+        if (--drop <= 0) break;
+      }
+    }
   }
 
   /** Best-effort "typing…" presence. Never throws into the caller. */
