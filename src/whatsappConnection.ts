@@ -159,12 +159,24 @@ export class WhatsAppConnection {
   }
 
   private async onMessagesUpsert(arg: { messages: WAMessage[]; type: MessageUpsertType }): Promise<void> {
-    // Only live messages ('notify'). 'append' = history sync — never answer the
-    // operator's backlog.
+    // Full inbound visibility, logged BEFORE any filter, so a silently-dropped
+    // message is never invisible again.
+    this.deps.log('info', 'WhatsApp upsert', {
+      type: arg.type,
+      count: arg.messages.length,
+      keys: arg.messages.slice(0, 5).map((m) => ({
+        fromMe: Boolean(m.key.fromMe),
+        jid: m.key.remoteJid,
+        hasMsg: Boolean(m.message),
+      })),
+    });
+
+    // Live messages arrive as 'notify'. 'append' = history sync — but we log it
+    // above so we can see if a ping is mis-delivered as 'append'.
     if (arg.type !== 'notify') return;
     for (const msg of arg.messages) {
+      const remoteJid = msg.key.remoteJid ?? '';
       try {
-        const remoteJid = msg.key.remoteJid ?? '';
         if (!remoteJid || remoteJid === 'status@broadcast') continue;
 
         // Never react to the echo of our OWN outgoing reply (self-chat loop guard).
@@ -179,13 +191,28 @@ export class WhatsAppConnection {
         // the user's chat). Rule: drop fromMe UNLESS it's the self-chat.
         const fromMe = Boolean(msg.key.fromMe);
         const isSelfChat = this.ownJid !== '' && jidNormalizedUser(remoteJid) === this.ownJid;
-        if (fromMe && !isSelfChat) continue;
+        if (fromMe && !isSelfChat) {
+          this.deps.log('info', 'WhatsApp inbound skipped: own message in another chat', {
+            jid: remoteJid,
+            ownJid: this.ownJid,
+          });
+          continue;
+        }
 
         const isGroup = isJidGroup(remoteJid) ?? remoteJid.endsWith('@g.us');
-        if (isGroup && this.deps.policy.ignoreGroups) continue;
+        if (isGroup && this.deps.policy.ignoreGroups) {
+          this.deps.log('info', 'WhatsApp inbound skipped: group (ignore_groups)', { jid: remoteJid });
+          continue;
+        }
 
         const text = extractText(msg);
-        if (!text) continue;
+        if (!text) {
+          this.deps.log('info', 'WhatsApp inbound skipped: no text content', {
+            jid: remoteJid,
+            kinds: Object.keys(msg.message ?? {}).join(',') || 'none',
+          });
+          continue;
+        }
 
         // Allowlist by real phone number. WhatsApp may address the chat by a
         // privacy "LID" (…@lid) whose digits are NOT the phone number, so we
@@ -215,7 +242,10 @@ export class WhatsAppConnection {
         void this.sendTyping(remoteJid);
         await this.deps.onMessage(buildIncomingTurn(this.deps.channelId, msg, text));
       } catch (err) {
-        this.deps.log('error', 'error handling inbound WhatsApp message', { error: (err as Error).message });
+        this.deps.log('error', 'error handling inbound WhatsApp message', {
+          jid: remoteJid,
+          error: (err as Error).message,
+        });
       }
     }
   }
