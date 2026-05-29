@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>WhatsApp — Omadia</title>
+    <!-- Harness baseline stylesheet (byte5 tokens, light/dark, .harness-* helpers). -->
+    <link rel="stylesheet" href="/bot-api/_harness/admin-ui.css" />
+  </head>
+  <body>
+    <!-- #region builder:admin-ui-body -->
+    <style>
+      .wa-wrap { max-width: var(--harness-iframe-max, 812px); }
+      .wa-status-row {
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+        margin: 1rem 0;
+      }
+      .wa-dot {
+        width: 0.7rem;
+        height: 0.7rem;
+        border-radius: var(--radius-pill, 9999px);
+        background: var(--fg-subtle);
+        flex: none;
+      }
+      .wa-dot[data-state='connected'] { background: var(--success); }
+      .wa-dot[data-state='qr'],
+      .wa-dot[data-state='connecting'],
+      .wa-dot[data-state='starting'] { background: var(--warning); }
+      .wa-dot[data-state='logged_out'],
+      .wa-dot[data-state='error'] { background: var(--danger); }
+      .wa-state-label { font-weight: 600; color: var(--fg-strong); }
+      .wa-qr-card {
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md, 14px);
+        background: var(--bg-elevated);
+        padding: 1.25rem;
+        text-align: center;
+        margin: 1rem 0;
+      }
+      .wa-qr-card img {
+        width: 280px;
+        max-width: 100%;
+        height: auto;
+        image-rendering: pixelated;
+        border-radius: var(--radius-sm, 8px);
+        background: #ffffff;
+        padding: 0.5rem;
+      }
+      .wa-steps { text-align: left; margin: 1rem auto 0; max-width: 22rem; color: var(--fg-muted); }
+      .wa-steps li { margin: 0.35rem 0; }
+      .wa-me { font-family: var(--font-mono); color: var(--fg-strong); }
+      .wa-actions { margin-top: 1rem; }
+      @media (max-width: 600px) {
+        .wa-qr-card img { width: 220px; }
+      }
+    </style>
+
+    <div class="wa-wrap">
+      <h1>WhatsApp</h1>
+      <p class="harness-subtitle">
+        Verbinde diesen Bot als verknüpftes Gerät mit einem WhatsApp-Konto. Die
+        Kopplung läuft genau wie WhatsApp Web — einmal QR scannen, fertig.
+      </p>
+
+      <div id="global-err" class="harness-banner-error" role="alert" hidden></div>
+
+      <div class="wa-status-row">
+        <span id="dot" class="wa-dot" data-state="starting" aria-hidden="true"></span>
+        <span id="state-label" class="wa-state-label">Lade…</span>
+      </div>
+
+      <!-- QR pairing -->
+      <section id="qr-section" hidden>
+        <div class="wa-qr-card">
+          <img id="qr-img" alt="WhatsApp Kopplungs-QR-Code" />
+          <ol class="wa-steps">
+            <li>WhatsApp auf deinem Handy öffnen.</li>
+            <li><b>Einstellungen → Verknüpfte Geräte → Gerät verknüpfen</b>.</li>
+            <li>Diesen QR-Code scannen.</li>
+          </ol>
+          <p class="harness-empty">Der Code wird automatisch erneuert, falls er abläuft.</p>
+        </div>
+      </section>
+
+      <!-- Connected -->
+      <section id="connected-section" hidden>
+        <div class="harness-banner-info" role="status">
+          Verbunden als <span id="me" class="wa-me">—</span>
+        </div>
+        <div class="wa-actions">
+          <button id="logout-btn" class="harness-btn" type="button">Gerät trennen &amp; neu koppeln</button>
+        </div>
+      </section>
+
+      <!-- Connecting / logged-out interstitials -->
+      <section id="info-section" hidden>
+        <p id="info-text" class="harness-empty"></p>
+      </section>
+    </div>
+
+    <script>
+      const POLL_MS = 2500;
+      const el = (id) => document.getElementById(id);
+
+      const STATE_LABELS = {
+        starting: 'Starte…',
+        connecting: 'Verbinde mit WhatsApp…',
+        qr: 'Warte auf QR-Scan',
+        connected: 'Verbunden',
+        logged_out: 'Abgemeldet — neue Kopplung wird vorbereitet…',
+        error: 'Fehler',
+      };
+
+      function show(id, visible) {
+        el(id).hidden = !visible;
+      }
+
+      function render(s) {
+        el('dot').dataset.state = s.status;
+        el('state-label').textContent = STATE_LABELS[s.status] || s.status;
+
+        const err = el('global-err');
+        if (s.lastError) {
+          err.textContent = s.lastError;
+          err.hidden = false;
+        } else {
+          err.hidden = true;
+        }
+
+        // QR section
+        const showQr = s.status === 'qr' && !!s.qrDataUrl;
+        show('qr-section', showQr);
+        if (showQr) el('qr-img').src = s.qrDataUrl;
+
+        // Connected section
+        const showConnected = s.status === 'connected';
+        show('connected-section', showConnected);
+        if (showConnected && s.me) {
+          el('me').textContent = s.me.name ? `${s.me.name} (${s.me.id})` : s.me.id;
+        }
+
+        // Interstitial
+        const interstitial =
+          (s.status === 'connecting' || s.status === 'starting' || s.status === 'logged_out') &&
+          !showQr;
+        show('info-section', interstitial);
+        if (interstitial) el('info-text').textContent = STATE_LABELS[s.status] || '…';
+      }
+
+      async function poll() {
+        try {
+          const data = await fetch('api/status', { cache: 'no-store' }).then((r) => r.json());
+          if (!data.ok) throw new Error(data.error || 'Statusabfrage fehlgeschlagen');
+          render(data);
+        } catch (e) {
+          const err = el('global-err');
+          err.textContent = e.message;
+          err.hidden = false;
+        }
+      }
+
+      el('logout-btn').addEventListener('click', async () => {
+        const btn = el('logout-btn');
+        btn.disabled = true;
+        try {
+          const data = await fetch('api/logout', { method: 'POST' }).then((r) => r.json());
+          if (!data.ok) throw new Error(data.error || 'Trennen fehlgeschlagen');
+          await poll();
+        } catch (e) {
+          const err = el('global-err');
+          err.textContent = e.message;
+          err.hidden = false;
+        } finally {
+          btn.disabled = false;
+        }
+      });
+
+      poll();
+      setInterval(poll, POLL_MS);
+    </script>
+    <!-- #endregion -->
+  </body>
+</html>

@@ -1,0 +1,40 @@
+{
+  "name": "@omadia/channel-whatsapp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/plugin.js",
+  "description": "WhatsApp channel for the Omadia harness — WhatsApp Web (Baileys) with QR linked-device pairing. Routes WhatsApp chats into the Omadia orchestrator.",
+  "license": "MIT",
+  "homepage": "https://github.com/byte5ai/omadia-channel-whatsapp",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/byte5ai/omadia-channel-whatsapp.git"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "node scripts/build-zip.mjs",
+    "clean": "rm -rf dist out"
+  },
+  "dependencies": {
+    "@hapi/boom": "^10.0.0",
+    "@whiskeysockets/baileys": "^6.7.0",
+    "qrcode": "^1.5.4"
+  },
+  "peerDependencies": {
+    "@omadia/channel-sdk": "*",
+    "@omadia/plugin-api": "*",
+    "express": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^22.0.0",
+    "@types/qrcode": "^1.5.5",
+    "esbuild": "^0.24.0",
+    "express": "^5.0.0",
+    "typescript": "^5.6.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

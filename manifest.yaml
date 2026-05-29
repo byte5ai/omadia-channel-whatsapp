@@ -1,0 +1,112 @@
+schema_version: "1"
+
+# ===========================================================================
+# @omadia/channel-whatsapp — WhatsApp channel (WhatsApp Web via Baileys)
+# ---------------------------------------------------------------------------
+# Schema of truth: docs/harness-platform/manifest-schema.v1.yaml (section 14).
+# A channel ROUTES turns — it has NO capabilities / playbook of its own. It
+# receives native WhatsApp events, translates them to the core IncomingTurn
+# shape, calls core.handleTurnStream(turn), and renders the answer back to
+# WhatsApp. Auth is the WhatsApp Web "linked device" QR flow (like OpenClaw).
+# ===========================================================================
+
+identity:
+  id: "@omadia/channel-whatsapp"          # === package.json "name"
+  kind: "channel"
+  domain: "whatsapp"
+  name: "WhatsApp"
+  version: "0.1.0"                         # === package.json "version"
+  description: "WhatsApp-Channel via WhatsApp Web (Baileys, QR-Linked-Device). Routet WhatsApp-Chats in den Omadia-Orchestrator."
+  authors:
+    - name: "byte5 GmbH"
+      email: "info@omadia.ai"
+      url: "https://omadia.ai"
+  license: "MIT"
+  homepage: "https://github.com/byte5ai/omadia-channel-whatsapp"
+  icon: "./assets/icon.svg"
+  categories:
+    - "communication"
+
+compat:
+  core: ">=1.0 <2.0"
+  node: ">=20"
+
+depends_on: []
+
+lifecycle:
+  entry: "dist/plugin.js"                  # exports `activate(ctx, core)` (ChannelPlugin shape 1)
+  uninstall_policy:
+    entities: "delete"
+    memory: "delete"                       # drops the persisted WhatsApp auth-state
+    secrets: "delete"
+
+# ---------------------------------------------------------------------------
+# Setup. WhatsApp Web auth is NOT a credential — it is the QR linked-device
+# scan, done AFTER install in the admin UI. So there is no secret to collect
+# here; self_test stays false (we cannot ping WhatsApp without a live scan).
+# These fields only tune routing/access policy.
+# ---------------------------------------------------------------------------
+setup:
+  fields:
+    - key: "device_name"
+      type: "string"
+      label: "Geräte-Name"
+      help: "Name, unter dem dieser Bot in WhatsApp → Verknüpfte Geräte erscheint."
+      required: false
+      default: "Omadia"
+
+    - key: "ignore_groups"
+      type: "boolean"
+      label: "Gruppen ignorieren"
+      help: "Wenn aktiv, reagiert der Bot nur auf Direkt-Chats (1:1) und bleibt in Gruppen still."
+      required: false
+      default: true
+
+    - key: "allowlist"
+      type: "string"
+      label: "Zugelassene Nummern (optional)"
+      help: "Komma-getrennte Telefonnummern (E.164, z.B. 491701234567), die mit dem Bot chatten dürfen. Leer = alle Direkt-Chats erlaubt."
+      required: false
+      default: ""
+
+  self_test: false
+
+# ---------------------------------------------------------------------------
+# Permissions. ctx.memory persists the Baileys auth-state (creds + signal
+# keys) so the linked device survives restarts. network.outbound is declared
+# for the operator permissions summary — Baileys opens its OWN WebSocket to
+# WhatsApp (it does not route through ctx.http), so this list is descriptive,
+# not enforced for this plugin.
+# ---------------------------------------------------------------------------
+permissions:
+  memory:
+    reads: ["agent:@omadia/channel-whatsapp:*"]
+    writes: ["agent:@omadia/channel-whatsapp:*"]
+  graph:
+    reads: []
+    writes: []
+  network:
+    outbound:
+      - "web.whatsapp.com"
+      - "*.whatsapp.net"
+      - "*.whatsapp.com"
+  filesystem:
+    scratch: false
+
+# Generic admin-UI iframe surface (rendered by web-ui for any plugin that
+# declares admin_ui_path). This is where the operator scans the QR code.
+admin_ui_path: "/api/whatsapp-channel/admin/index.html"
+
+# ---------------------------------------------------------------------------
+# Channel block (schema section 14). WhatsApp Web is a long-lived outbound
+# WebSocket — no inbound webhook routes to mount.
+# ---------------------------------------------------------------------------
+channel:
+  transport:
+    kind: "websocket"
+  capabilities:
+    - "text"
+    - "typing_indicator"
+  adapters:
+    - "text"
+    - "markdown"

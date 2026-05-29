@@ -1,0 +1,12 @@
+node_modules/
+dist/
+out/
+*.log
+.env
+.env.local
+.DS_Store
+
+# Local Baileys auth-state dumps (only ever written by the build/dev harness,
+# never the runtime — the runtime persists auth via ctx.memory). Belt-and-braces.
+.wa-auth/
+auth_info*/
