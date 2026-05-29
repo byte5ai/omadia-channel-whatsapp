@@ -16,7 +16,7 @@ import type { IncomingTurn } from '@omadia/channel-sdk';
 import type { MemoryAccessor } from '@omadia/plugin-api';
 
 import { useMemoryAuthState } from './authState.js';
-import { buildIncomingTurn, extractText, jidToPhone } from './inbound.js';
+import { buildIncomingTurn, extractText, phoneCandidates } from './inbound.js';
 import { makeBaileysLogger, type BaileysLogger, type LogSink } from './logger.js';
 import { patchState, type ChannelState } from './state.js';
 
@@ -187,12 +187,23 @@ export class WhatsAppConnection {
         const text = extractText(msg);
         if (!text) continue;
 
-        // Allowlist scopes by conversation partner: the sender in groups, the
-        // chat jid in DMs.
-        if (this.deps.policy.allowlist.size > 0) {
-          const partyJid = isGroup ? (msg.key.participant ?? remoteJid) : remoteJid;
-          if (!this.deps.policy.allowlist.has(jidToPhone(partyJid))) {
-            this.deps.log('info', 'WhatsApp message dropped (not allowlisted)', { jid: remoteJid });
+        // Allowlist by real phone number. WhatsApp may address the chat by a
+        // privacy "LID" (…@lid) whose digits are NOT the phone number, so we
+        // match against every phone-form JID Baileys exposes (incl. senderPn /
+        // participantPn). Self-chat always passes. If no phone is resolvable
+        // (LID-only, no PN present), allow + warn rather than silently
+        // black-holing the message.
+        if (this.deps.policy.allowlist.size > 0 && !isSelfChat) {
+          const phones = phoneCandidates(msg);
+          if (phones.length === 0) {
+            this.deps.log('warn', 'allowlist set but no phone number resolvable (LID-only) — allowing', {
+              jid: remoteJid,
+            });
+          } else if (!phones.some((p) => this.deps.policy.allowlist.has(p))) {
+            this.deps.log('info', 'WhatsApp message dropped (not allowlisted)', {
+              jid: remoteJid,
+              candidates: phones,
+            });
             continue;
           }
         }

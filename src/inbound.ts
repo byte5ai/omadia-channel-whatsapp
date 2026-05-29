@@ -1,4 +1,4 @@
-import { isJidGroup, jidNormalizedUser, type WAMessage } from '@whiskeysockets/baileys';
+import { isJidGroup, jidNormalizedUser, type WAMessage, type WAMessageKey } from '@whiskeysockets/baileys';
 
 import type {
   ChatStreamEvent,
@@ -37,6 +37,25 @@ export function jidToPhone(jid: string): string {
   const user = jid.split('@')[0] ?? '';
   // strip device/agent suffixes like `:12` and any non-digits
   return user.split(':')[0]!.replace(/\D/g, '');
+}
+
+/**
+ * Real phone numbers (digits-only) this message can be attributed to.
+ *
+ * WhatsApp increasingly addresses chats by a privacy "LID" (`…@lid`) whose
+ * digits are NOT the phone number — so `jidToPhone(remoteJid)` is useless for
+ * an allowlist. Baileys still carries the phone-number JID in the
+ * `senderPn`/`participantPn` key fields; we collect every phone-form
+ * (`@s.whatsapp.net`) JID and ignore the LID ones.
+ */
+export function phoneCandidates(msg: WAMessage): string[] {
+  const key = msg.key as WAMessageKey;
+  const jids = [key.remoteJid, key.participant, key.senderPn, key.participantPn];
+  const phones = jids
+    .filter((j): j is string => typeof j === 'string' && j.endsWith('@s.whatsapp.net'))
+    .map(jidToPhone)
+    .filter((p) => p.length > 0);
+  return [...new Set(phones)];
 }
 
 /** Translate a native WhatsApp message into the core `IncomingTurn` shape. */
