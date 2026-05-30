@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import * as channelSdk from '@omadia/channel-sdk';
 import {
   isNoReply,
   logNoReplyDrop,
@@ -34,14 +35,13 @@ export async function activate(ctx: PluginContext, core: CoreApi): Promise<Chann
   const ignoreGroups = ctx.config.get<boolean>('ignore_groups') ?? true;
   const allowlist = parseAllowlist(ctx.config.get<string>('allowlist') ?? '');
 
-  // The real orchestrator is published in the service registry as a
-  // ChatAgentBundle under 'chatAgent' — this is how channels actually drive
-  // turns (the CoreApi.handleTurnStream dispatcher is an unwired kernel stub).
-  const chatBundle = ctx.services.get<{ agent: ChatAgent }>('chatAgent');
-  const agent = chatBundle?.agent;
+  // Resolve the orchestrator's ChatAgent. Prefers the SDK's getChatAgent()
+  // helper; falls back to the raw 'chatAgent' service lookup so the plugin
+  // still runs on a host whose channel-sdk predates the helper.
+  const agent = resolveChatAgent(ctx);
   if (!agent) {
     throw new Error(
-      "@omadia/channel-whatsapp: 'chatAgent' service unavailable — the orchestrator plugin must be installed and active",
+      '@omadia/channel-whatsapp: orchestrator unavailable (getChatAgent) — the orchestrator plugin must be installed and active',
     );
   }
 
@@ -127,6 +127,21 @@ async function handleTurn(
       /* original error already logged — don't mask it with a send failure */
     }
   }
+}
+
+/**
+ * Resolve the orchestrator's {@link ChatAgent}. Prefers the SDK helper
+ * `getChatAgent(ctx)` (the blessed, typed path); falls back to the raw
+ * service-registry lookup so the plugin also runs on a host whose
+ * `@omadia/channel-sdk` predates the helper (the `chatAgent` service itself
+ * has always been there). Accessed via the namespace so a missing export is
+ * just `undefined` at runtime rather than a module-load error.
+ */
+function resolveChatAgent(ctx: PluginContext): ChatAgent | undefined {
+  const helper = (channelSdk as { getChatAgent?: (c: PluginContext) => ChatAgent | undefined })
+    .getChatAgent;
+  if (helper) return helper(ctx);
+  return ctx.services.get<{ agent: ChatAgent }>('chatAgent')?.agent;
 }
 
 /** Parse the comma-separated allowlist into digits-only phone numbers. */
