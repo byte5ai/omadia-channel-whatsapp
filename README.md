@@ -1,6 +1,6 @@
 # @omadia/channel-whatsapp
 
-A **WhatsApp channel** for the [Omadia](https://omadia.ai) harness. It links a
+A **WhatsApp channel** for [Omadia](https://omadia.ai). It links a
 WhatsApp account to your Omadia orchestrator as a **WhatsApp Web "linked
 device"** — you scan a QR code once (exactly like WhatsApp Web, and like the
 OpenClaw WhatsApp integration this is modeled on) and from then on every chat
@@ -9,12 +9,6 @@ to that number is routed through your agents.
 Built on [Baileys](https://github.com/WhiskeySockets/Baileys) (the
 multi-device WhatsApp Web library). No phone-number registration, no Meta
 Business API, no webhook host — just a QR scan.
-
-> **Separate public repo.** This package lives in its own repository
-> (`byte5ai/omadia-channel-whatsapp`) and is developed as a folder nested
-> inside the Omadia core checkout — exactly like `marketing-site/` and `hub/`,
-> and gitignored there for the same reason. Unlike those two it is **public
-> OSS** (MIT).
 
 ---
 
@@ -41,7 +35,7 @@ src/
 ├── adminRouter.ts        # /api/whatsapp-channel/admin — QR status + re-pair
 ├── logger.ts             # Baileys (pino-shaped) logger → CoreApi.log
 └── state.ts              # shared connection/QR state
-assets/admin-ui/index.html # QR pairing page (harness-styled, single file)
+assets/admin-ui/index.html # QR pairing page (single file)
 ```
 
 ---
@@ -62,7 +56,7 @@ Install the resulting ZIP into Omadia:
 
 - **Local / smoke:** Admin-UI → *Store → Lokal → Upload* → drop the `.zip`.
 - **Hub:** publish to the registry, then *Store → Hub → Jetzt installieren*
-  (see the core's `docs/creating-plugins.md`).
+  (see the Omadia plugin docs).
 
 After install, open the plugin's admin UI (Store detail page → Admin iframe, or
 directly `…/api/whatsapp-channel/admin/index.html`), then on your phone:
@@ -88,18 +82,17 @@ host-provided, so `scripts/build-zip.mjs` **esbuild-bundles them into
 `dist/plugin.js`**. (tsc alone can't do this — hence esbuild.)
 
 > **Alternative:** if you would rather keep `dist` thin, move `@whiskeysockets/baileys`
-> + `qrcode` to the host's `node_modules` (`npm i` them in the middleware) and
+> + `qrcode` into the host's `node_modules` and
 > drop them from the esbuild `external`-inverse — then a tsc-only build works.
 > The bundled approach is the default because it keeps the plugin self-contained
 > and installable through the Hub with zero host changes.
 
 ### Typecheck
 
-`tsconfig.json` maps `@omadia/channel-sdk` / `@omadia/plugin-api` to the built
-`.d.ts` in the **adjacent Omadia core checkout** (`../middleware/packages/…`),
-which is where this folder lives during development. A standalone clone without
-the core alongside won't typecheck (the types aren't published to npm), but the
-esbuild build still works because those packages are `external` at runtime.
+`tsconfig.json` resolves the `@omadia/channel-sdk` / `@omadia/plugin-api` types
+via `paths`; point them at wherever you have the Omadia SDK type declarations
+built (these packages aren't published to npm). The esbuild build itself doesn't
+need them — both are `external` at runtime, provided by the host.
 
 ---
 
