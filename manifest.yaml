@@ -15,7 +15,7 @@ identity:
   kind: "channel"
   domain: "whatsapp"
   name: "WhatsApp"
-  version: "0.1.6"                         # === package.json "version"
+  version: "0.1.7"                         # === package.json "version"
   description: "WhatsApp-Channel via WhatsApp Web (Baileys, QR-Linked-Device). Routet WhatsApp-Chats in den Omadia-Orchestrator."
   authors:
     - name: "byte5 GmbH"
@@ -47,6 +47,58 @@ lifecycle:
 # These fields only tune routing/access policy.
 # ---------------------------------------------------------------------------
 setup:
+  guide:
+    en: |
+      ## Link WhatsApp
+
+      This channel uses **WhatsApp Web** (linked device) — **no** API key, **no**
+      Meta registration. After installing you scan a QR code, exactly like
+      linking WhatsApp Web on the desktop.
+
+      ### 1. Install
+      The fields below are optional — just **install**.
+
+      ### 2. Scan the QR code
+      1. After installing, open the **plugin admin UI** (connection status).
+      2. A **QR code** appears.
+      3. On your phone: **WhatsApp → Settings → Linked Devices → Link a Device**
+         → scan the QR code.
+      4. Wait for the **connected** status. The bot now shows up under
+         *Linked Devices* with the **device name** set above.
+
+      > ⚠️ **Note:** this is an unofficial WhatsApp Web client (Baileys), not the
+      > official WhatsApp Business Cloud API. Prefer a **dedicated, separate
+      > number** — excessive automation can be restricted by WhatsApp.
+
+      ### 3. Limit the reach (optional)
+      *Ignore groups* keeps the bot silent in groups; the *allowlist* restricts
+      it to specific phone numbers (E.164, e.g. `491701234567`).
+    de: |
+      ## WhatsApp verknüpfen
+
+      Dieser Channel nutzt **WhatsApp Web** (verknüpftes Gerät) — **kein** API-Key,
+      **keine** Meta-Registrierung. Du scannst nach der Installation einen
+      QR-Code, genau wie beim Verknüpfen von WhatsApp Web am Desktop.
+
+      ### 1. Installieren
+      Felder unten sind optional — direkt **installieren**.
+
+      ### 2. QR-Code scannen
+      1. Öffne nach der Installation die **Plugin-Admin-UI** (Verbindungsstatus).
+      2. Es erscheint ein **QR-Code**.
+      3. Auf dem Telefon: **WhatsApp → Einstellungen → Verknüpfte Geräte →
+         Gerät verknüpfen** → QR-Code scannen.
+      4. Warte auf den Status **verbunden**. Der Bot taucht jetzt unter
+         *Verknüpfte Geräte* mit dem oben gesetzten **Geräte-Namen** auf.
+
+      > ⚠️ **Hinweis:** Es handelt sich um einen inoffiziellen WhatsApp-Web-Client
+      > (Baileys), nicht um die offizielle WhatsApp Business Cloud API. Nutze
+      > idealerweise eine **eigene, dedizierte Nummer** — übermäßige Automatisierung
+      > kann von WhatsApp eingeschränkt werden.
+
+      ### 3. Reichweite eingrenzen (optional)
+      Mit *Gruppen ignorieren* bleibt der Bot in Gruppen still; mit der *Allowlist*
+      beschränkst du ihn auf bestimmte Telefonnummern (E.164, z.B. `491701234567`).
   fields:
     - key: "device_name"
       type: "string"
