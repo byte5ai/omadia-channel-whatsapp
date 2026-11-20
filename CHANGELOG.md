@@ -70,6 +70,12 @@ publish before that kernel is live.
   `conversationDelivery` / `isAllMessagesSubscribed`: `addressed` reports only
   what addresses the bot, `all` also unaddressed group messages and leaves the
   turn to the engine, `none` nothing.
+- **A typed answer starts no turn.** An addressed message is reported with
+  `reportConversationMessage` before the turn; if the kernel took it as the
+  typed answer to an open poll or card (`answeredCard`), the plugin starts no
+  turn (no pace acknowledgement, no agent reply). The wait is bounded (1.5 s);
+  a timeout or error is logged and the turn starts. Without the method (older
+  kernel) it is `emit` and the turn, as before.
 - **`compat.core` is `>=1.74.0 <2.0`** (placeholder; the final range is set with
   the release).
 - **Groups (`ignore_groups` off).** The bot answers only when @mentioned,
