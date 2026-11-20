@@ -15,7 +15,7 @@ import type { WAMessage } from '@whiskeysockets/baileys';
 import { createAnswerEmitter } from '../src/emit.js';
 import { groupAddressing, stripOwnMention } from '../src/groupAddressing.js';
 import { buildIncomingTurn, buildTurnOrigin, principalRefOf, routePrincipalOf } from '../src/inbound.js';
-import { createTurnRouter } from '../src/routing.js';
+import { createTurnRouter, routeLocaleOf } from '../src/routing.js';
 import { NO_AGENT_TEXT, TURN_FAILED_TEXT, createTurnHandler } from '../src/turnHandler.js';
 import { OWN, fakeAgent, mira, textMessage } from './helpers.js';
 
@@ -54,14 +54,12 @@ function recording() {
 }
 
 function resolverReturning(result: ReturnType<ChannelBindingResolver['resolve']>) {
-  const calls: Array<{ type: string; key: string; context: ChannelRouteContext | undefined }> = [];
-  const resolver: ChannelBindingResolver = {
-    resolve: (type, key, context) => {
-      calls.push({ type, key, context });
-      return result;
-    },
+  const calls: Array<{ key: string; context: ChannelRouteContext | undefined }> = [];
+  const resolve = (key: string, context?: ChannelRouteContext) => {
+    calls.push({ key, context });
+    return result;
   };
-  return { resolver, calls };
+  return { resolve, calls };
 }
 
 function direct(text: string): IncomingTurn {
@@ -102,27 +100,27 @@ describe('principal: one form for every channel (spec 5.3)', () => {
   });
 
   it('the router hands the resolver the conversation as key and the principal as context', () => {
-    const { resolver, calls } = resolverReturning({ decision: 'bound', chatAgent: fakeAgent([]), speaker: mira });
-    const route = createTurnRouter({ resolver: () => resolver, singleAgent: undefined });
+    const { resolve, calls } = resolverReturning({ decision: 'bound', chatAgent: fakeAgent([]), speaker: mira });
+    const route = createTurnRouter({ resolve, singleAgent: () => undefined });
     const turn = direct('Hallo');
     const principal = routePrincipalOf(turn, buildTurnOrigin(turn, undefined));
     const decided = route(turn, principal);
     assert.equal(decided.decision, 'bound');
     assert.deepEqual(decided.speaker, mira);
-    assert.deepEqual(calls, [{ type: 'whatsapp', key: ANNA_PN, context: { principal } }]);
+    assert.deepEqual(calls, [{ key: ANNA_PN, context: { principal } }], 'chat JID is the key; no locale WhatsApp did not state');
   });
 });
 
 describe('routing contract: bound / reject, no fallback agent', () => {
   it('without a resolver the single orchestrator answers (minimal deployment)', () => {
     const agent = fakeAgent([]);
-    const route = createTurnRouter({ resolver: () => undefined, singleAgent: agent });
+    const route = createTurnRouter({ resolve: () => undefined, singleAgent: () => agent });
     assert.equal(route(direct('x'), 'user:whatsapp-phone:x').chatAgent, agent);
   });
 
   it('with a resolver the singleton is never a fallback: a reject stays a reject', () => {
-    const { resolver } = resolverReturning({ decision: 'reject', notice });
-    const route = createTurnRouter({ resolver: () => resolver, singleAgent: fakeAgent([]) });
+    const { resolve } = resolverReturning({ decision: 'reject', notice });
+    const route = createTurnRouter({ resolve, singleAgent: () => fakeAgent([]) });
     const decided = route(direct('x'), 'user:whatsapp-phone:x');
     assert.equal(decided.decision, 'reject');
     assert.equal(decided.chatAgent, undefined);
@@ -168,15 +166,13 @@ describe('routing contract: bound / reject, no fallback agent', () => {
   });
 
   it('a resolver that throws fails the turn loudly as system, not into a default agent', async () => {
-    const resolver: ChannelBindingResolver = {
-      resolve: () => {
-        throw new Error('registry down');
-      },
+    const resolve = (): never => {
+      throw new Error('registry down');
     };
     const { emitter, sent, speakers } = recording();
     const fallback = fakeAgent([{ text: 'must not answer', speaker: mira }]);
     const handler = createTurnHandler({
-      route: createTurnRouter({ resolver: () => resolver, singleAgent: fallback }),
+      route: createTurnRouter({ resolve, singleAgent: () => fallback }),
       emitter,
       log: () => {},
     });
@@ -191,6 +187,33 @@ describe('routing contract: bound / reject, no fallback agent', () => {
     const handler = createTurnHandler({ route: () => ({ decision: 'bound' }), emitter, log: () => {} });
     await handler.handle(direct('Hallo'));
     assert.deepEqual(sent, [TURN_FAILED_TEXT]);
+  });
+});
+
+describe('selection key and locale (S1: tightest conversation key + principal)', () => {
+  it('the key is the chat JID: the group for a group, the sender\'s chat for a direct chat', () => {
+    const { resolve, calls } = resolverReturning({ decision: 'reject', notice });
+    const route = createTurnRouter({ resolve, singleAgent: () => undefined });
+    const group = buildIncomingTurn('wa', textMessage({ jid: GROUP, participant: ANNA_PN, text: 'x' }), 'x');
+    route(group, 'user:whatsapp-phone:a');
+    route(direct('x'), 'user:whatsapp-phone:a');
+    assert.deepEqual(calls.map((c) => c.key), [GROUP, ANNA_PN]);
+  });
+
+  it('WhatsApp states no language, so the locale is left out; a stated one is normalised and passed on', () => {
+    assert.equal(routeLocaleOf(direct('x')), undefined);
+    const { resolve, calls } = resolverReturning({ decision: 'reject', notice });
+    const route = createTurnRouter({ resolve, singleAgent: () => undefined });
+    route(direct('x'), 'p');
+    route({ ...direct('x'), metadata: { locale: 'en-GB' } }, 'p');
+    route({ ...direct('x'), metadata: { locale: 'fr' } }, 'p');
+    assert.deepEqual(calls.map((c) => c.context), [{ principal: 'p' }, { principal: 'p', locale: 'en' }, { principal: 'p' }]);
+  });
+
+  it('with a resolver the chatAgent@1 singleton is never read', () => {
+    const { resolve } = resolverReturning({ decision: 'reject', notice });
+    const route = createTurnRouter({ resolve, singleAgent: () => assert.fail('singleton read despite resolver') });
+    assert.equal(route(direct('x'), 'p').decision, 'reject');
   });
 });
 

@@ -1,8 +1,9 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import * as channelSdk from '@omadia/channel-sdk';
 import {
+  getChatAgent,
+  resolveChannelRoute,
   rosterStatusOf,
   type ChatAgent,
   type ChannelHandle,
@@ -13,12 +14,12 @@ import type { PluginContext } from '@omadia/plugin-api';
 
 import { createAdminRouter } from './adminRouter.js';
 import { createCardReplyHandler, whatsAppInstallationKey } from './cardReplies.js';
-import { createAnswerEmitter } from './emit.js';
+import { WHATSAPP_CHANNEL_TYPE, createAnswerEmitter } from './emit.js';
 import { OpenCardRegistry } from './openCards.js';
 import { createWhatsAppRosterProvider } from './roster.js';
 import { createWhatsAppSendProviders } from './sendProviders.js';
 import { PersistentSpeakerHistoryStore } from './speakerHistory.js';
-import { createTurnRouter, channelResolverOf } from './routing.js';
+import { createTurnRouter } from './routing.js';
 import { createChannelState } from './state.js';
 import { createTurnHandler } from './turnHandler.js';
 import { WhatsAppConnection } from './whatsappConnection.js';
@@ -40,16 +41,6 @@ export async function activate(ctx: PluginContext, core: CoreApi): Promise<Chann
   const deviceName = ctx.config.get<string>('device_name') ?? 'Omadia';
   const ignoreGroups = ctx.config.get<boolean>('ignore_groups') ?? true;
   const allowlist = parseAllowlist(ctx.config.get<string>('allowlist') ?? '');
-
-  // Resolve the orchestrator's ChatAgent. Prefers the SDK's getChatAgent()
-  // helper; falls back to the raw 'chatAgent' service lookup so the plugin
-  // still runs on a host whose channel-sdk predates the helper.
-  const agent = resolveChatAgent(ctx);
-  if (!agent) {
-    throw new Error(
-      '@omadia/channel-whatsapp: orchestrator unavailable (getChatAgent) — the orchestrator plugin must be installed and active',
-    );
-  }
 
   const state = createChannelState();
 
@@ -75,8 +66,11 @@ export async function activate(ctx: PluginContext, core: CoreApi): Promise<Chann
   const turns = createTurnHandler({
     // The platform's channelResolver decides per turn and per sender (bound
     // agent + speaker, or reject + notice); there is no fallback agent. The
-    // singleton orchestrator is used only when no resolver is published.
-    route: createTurnRouter({ resolver: () => channelResolverOf(ctx), singleAgent: agent }),
+    // chatAgent@1 singleton is read only when no resolver is published.
+    route: createTurnRouter({
+      resolve: (channelKey, context) => resolveChannelRoute(ctx, WHATSAPP_CHANNEL_TYPE, channelKey, context),
+      singleAgent: () => resolveSingleAgent(ctx),
+    }),
     emitter,
     sendTyping: (jid) => conn.sendTyping(jid),
     log: (level, message, context) => core.log(level, message, context),
@@ -179,18 +173,12 @@ export async function activate(ctx: PluginContext, core: CoreApi): Promise<Chann
 }
 
 /**
- * Resolve the orchestrator's {@link ChatAgent}. Prefers the SDK helper
- * `getChatAgent(ctx)` (the blessed, typed path); falls back to the raw
- * service-registry lookup so the plugin also runs on a host whose
- * `@omadia/channel-sdk` predates the helper (the `chatAgent` service itself
- * has always been there). Accessed via the namespace so a missing export is
- * just `undefined` at runtime rather than a module-load error.
+ * The `chatAgent@1` singleton: the answer path of a host WITHOUT a channel
+ * resolver only. With a resolver it is never read (it refuses every non-canvas
+ * turn there), so no resolver result is ever overridden by it.
  */
-function resolveChatAgent(ctx: PluginContext): ChatAgent | undefined {
-  const helper = (channelSdk as { getChatAgent?: (c: PluginContext) => ChatAgent | undefined })
-    .getChatAgent;
-  if (helper) return helper(ctx);
-  return ctx.services.get<{ agent: ChatAgent }>('chatAgent')?.agent;
+function resolveSingleAgent(ctx: PluginContext): ChatAgent | undefined {
+  return getChatAgent(ctx);
 }
 
 /** Parse the comma-separated allowlist into digits-only phone numbers. */

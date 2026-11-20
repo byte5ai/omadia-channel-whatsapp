@@ -12,7 +12,7 @@ import {
 import type { AnswerEmitter } from './emit.js';
 import { systemAnswer } from './emit.js';
 import { buildTurnOrigin, messageIdOf, routePrincipalOf, sessionScopeOf } from './inbound.js';
-import type { TurnRoute } from './routing.js';
+import { routeLocaleOf, type TurnRoute } from './routing.js';
 
 /** Why the connection did not hand a turn to an agent. */
 export type TurnRefusal = 'group_roster_unavailable';
@@ -127,7 +127,10 @@ export function createTurnHandler(deps: TurnHandlerDeps): TurnHandler {
             onHookError: (hook, error) =>
               deps.log('warn', 'WhatsApp pace hook failed', { hook, error: (error as Error).message }),
           },
-          deps.clock ? { clock: deps.clock } : {},
+          {
+            ...(deps.clock ? { clock: deps.clock } : {}),
+            ...(routeLocaleOf(turn) ? { locale: routeLocaleOf(turn) as string } : {}),
+          },
         );
         if (isNoReply(answer)) {
           logNoReplyDrop(turn.channelId, { conversationId: turn.conversationId });

@@ -1,42 +1,53 @@
 import {
-  CHANNEL_RESOLVER_SERVICE,
-  type ChannelBindingResolver,
   type ChannelResolveResult,
+  type ChannelRouteContext,
   type ChatAgent,
   type IncomingTurn,
 } from '@omadia/channel-sdk';
-import type { PluginContext } from '@omadia/plugin-api';
-
-import { WHATSAPP_CHANNEL_TYPE } from './emit.js';
 
 /** What the platform decided for one turn: the part of {@link ChannelResolveResult} the channel acts on. */
 export type TurnRoute = Pick<ChannelResolveResult, 'decision' | 'chatAgent' | 'notice' | 'speaker'>;
 
 export interface TurnRouterDeps {
-  /** The platform's channel resolver, looked up per turn (a hot config reload applies at once). */
-  readonly resolver: () => ChannelBindingResolver | undefined;
   /**
-   * The deployment's orchestrator, used ONLY when the platform publishes no
-   * resolver (a minimal, single-orchestrator deployment). With a resolver
-   * there is no fallback agent (spec 2042 INV-7): a turn nobody answers for is
-   * refused, never handed to the shared orchestrator.
+   * The platform's full routing result for `(whatsapp, channelKey)`
+   * (`resolveChannelRoute`), looked up per turn so a hot config reload applies
+   * at once; `undefined` when the platform publishes no resolver.
    */
-  readonly singleAgent: ChatAgent | undefined;
+  readonly resolve: (channelKey: string, context: ChannelRouteContext) => ChannelResolveResult | undefined;
+  /**
+   * The `chatAgent@1` singleton, read ONLY when the platform publishes no
+   * resolver (a host without a multi-agent registry). With a resolver there is
+   * no fallback agent (spec 2042 INV-7) and `chatAgent@1` is a refuser anyway:
+   * a turn nobody answers for is rejected, never handed to the singleton.
+   */
+  readonly singleAgent: () => ChatAgent | undefined;
+}
+
+/** The person's language (`de`/`en`) when the turn states one; WhatsApp messages carry none, so usually `undefined`. */
+export function routeLocaleOf(turn: IncomingTurn): string | undefined {
+  const raw = turn.metadata?.['locale'];
+  if (typeof raw !== 'string') return undefined;
+  const language = raw.trim().toLowerCase().split(/[-_]/)[0];
+  return language === 'de' || language === 'en' ? language : undefined;
 }
 
 /**
- * Ask the platform who answers a turn: the conversation is the routing key,
- * the sender's principal lets it apply selections and availability. A resolver
- * error is NOT swallowed into a default agent; it fails the turn, and the user
- * is told by a `system` notice.
+ * Ask the platform who answers a turn. The routing key is the chat JID, the
+ * tightest conversation key (a group, or the direct chat), and the selection
+ * (`/agent`) hangs on it plus the sender's principal. The locale is passed only
+ * when known; without it notices come in German. A resolver error is NOT
+ * swallowed into a default agent; it fails the turn, and the user is told by a
+ * `system` notice.
  */
 export function createTurnRouter(deps: TurnRouterDeps): (turn: IncomingTurn, principal: string) => TurnRoute {
   return (turn, principal) => {
-    const resolver = deps.resolver();
-    if (!resolver) {
-      return { decision: 'bound', ...(deps.singleAgent ? { chatAgent: deps.singleAgent } : {}) };
+    const locale = routeLocaleOf(turn);
+    const result = deps.resolve(turn.conversationId, { principal, ...(locale ? { locale } : {}) });
+    if (!result) {
+      const singleAgent = deps.singleAgent();
+      return { decision: 'bound', ...(singleAgent ? { chatAgent: singleAgent } : {}) };
     }
-    const result = resolver.resolve(WHATSAPP_CHANNEL_TYPE, turn.conversationId, { principal });
     return {
       decision: result.decision,
       ...(result.chatAgent ? { chatAgent: result.chatAgent } : {}),
@@ -44,9 +55,4 @@ export function createTurnRouter(deps: TurnRouterDeps): (turn: IncomingTurn, pri
       ...(result.speaker ? { speaker: result.speaker } : {}),
     };
   };
-}
-
-/** The resolver the platform published, if any. */
-export function channelResolverOf(ctx: PluginContext): ChannelBindingResolver | undefined {
-  return ctx.services.get<ChannelBindingResolver>(CHANNEL_RESOLVER_SERVICE);
 }
