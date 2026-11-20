@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.1
+
+- The manifest now declares `raw.githubusercontent.com` as an outbound host.
+  Baileys reads the current WhatsApp Web version from there before it connects;
+  the call was already made in 0.2.0 but was not declared, so the model gateway
+  saw an undeclared egress. If the host is blocked the plugin still falls back to
+  the bundled version, as before.
+
 ## 0.2.0
 
 Agents as colleagues (omadia epic byte5ai/omadia#2042, issue #4). Needs a kernel
