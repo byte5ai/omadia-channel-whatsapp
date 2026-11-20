@@ -17,6 +17,7 @@ import type { IncomingTurn } from '@omadia/channel-sdk';
 import type { MemoryAccessor } from '@omadia/plugin-api';
 
 import { useMemoryAuthState } from './authState.js';
+import type { MessageAddressing } from './conversationMessages.js';
 import { groupAddressing, stripOwnMention, type OwnIdentity } from './groupAddressing.js';
 import { buildIncomingTurn, extractText, phoneCandidates } from './inbound.js';
 import { makeBaileysLogger, type BaileysLogger, type LogSink } from './logger.js';
@@ -38,7 +39,10 @@ export interface WhatsAppConnectionDeps {
   deviceName: string;
   state: ChannelState;
   policy: AccessPolicy;
-  onMessage: (turn: IncomingTurn) => Promise<void>;
+  /** A turn addressed to the bot, and how it was (a direct chat, mention, reply, command). */
+  onMessage: (turn: IncomingTurn, addressing: MessageAddressing) => Promise<void>;
+  /** A group message that does not address the bot: not a turn; reported to the kernel when it asks for every message. */
+  onObserved?: (turn: IncomingTurn) => void;
   /** A turn the connection will not hand to an agent (told to the user as a notice). */
   onRefused: (turn: IncomingTurn, reason: TurnRefusal) => Promise<void>;
   /**
@@ -239,16 +243,14 @@ export class WhatsAppConnection {
         // it is addressed — @mention, reply to one of its messages, or the
         // `/agent` command — never on every message. The own @mention token is
         // removed so "@Omadia /agent Mira" reaches the kernel as `/agent Mira`.
+        // An unaddressed group message is no turn, but the kernel may want it
+        // (a facilitation reads every message), so it is reported after the
+        // allowlist below.
         let text = rawText;
+        let addressing: MessageAddressing | undefined = 'direct';
         if (isGroup) {
-          const addressing = groupAddressing(msg, rawText, this.ownIdentity());
-          if (!addressing) {
-            this.deps.log('info', 'WhatsApp inbound skipped: group message not addressed to the bot', {
-              jid: remoteJid,
-            });
-            continue;
-          }
-          text = stripOwnMention(rawText, this.ownIdentity()) || rawText;
+          addressing = groupAddressing(msg, rawText, this.ownIdentity());
+          if (addressing) text = stripOwnMention(rawText, this.ownIdentity()) || rawText;
         }
 
         // Allowlist by real phone number. WhatsApp may address the chat by a
@@ -275,6 +277,13 @@ export class WhatsAppConnection {
         this.deps.log('info', 'WhatsApp message received', { jid: remoteJid, fromMe, isGroup });
 
         const turn = buildIncomingTurn(this.deps.channelId, msg, text);
+        if (!addressing) {
+          this.deps.log('info', 'WhatsApp inbound not a turn: group message not addressed to the bot', {
+            jid: remoteJid,
+          });
+          this.deps.onObserved?.(turn);
+          continue;
+        }
         if (isGroup && !(await this.deps.canAnswerGroup(remoteJid))) {
           await this.deps.onRefused(turn, 'group_roster_unavailable');
           continue;
@@ -282,7 +291,7 @@ export class WhatsAppConnection {
 
         // No receipt reaction (not a declared decoration). The turn handler
         // shows the typing indicator and paces long work (spec 2042 §5.8).
-        await this.deps.onMessage(turn);
+        await this.deps.onMessage(turn, addressing);
       } catch (err) {
         this.deps.log('error', 'error handling inbound WhatsApp message', {
           jid: remoteJid,

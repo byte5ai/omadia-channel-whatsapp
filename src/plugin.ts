@@ -13,9 +13,8 @@ import {
 import type { PluginContext } from '@omadia/plugin-api';
 
 import { createAdminRouter } from './adminRouter.js';
-import { createCardReplyHandler, whatsAppInstallationKey } from './cardReplies.js';
+import { createMessageEvents, whatsAppInstallationKey, type DeliveryMode } from './conversationMessages.js';
 import { WHATSAPP_CHANNEL_TYPE, createAnswerEmitter } from './emit.js';
-import { OpenCardRegistry } from './openCards.js';
 import { createWhatsAppRosterProvider } from './roster.js';
 import { createWhatsAppSendProviders } from './sendProviders.js';
 import { PersistentSpeakerHistoryStore } from './speakerHistory.js';
@@ -76,33 +75,24 @@ export async function activate(ctx: PluginContext, core: CoreApi): Promise<Chann
     log: (level, message, context) => core.log(level, message, context),
   });
 
-  // Questions posted as plain text (polls, question cards) and the typed answers
-  // to them (spec 2042 §5.14 channel parity, criterion 30).
-  const openCards = new OpenCardRegistry();
-  const canReceiveCardAnswers = typeof core.emitConversationMessage === 'function';
-  const cardReplies = createCardReplyHandler({
+  // Polls and question cards: the kernel posts them as numbered text through
+  // `sendToConversation` and turns a typed reply into the `card_answer` from the
+  // `created` events below (replyToMessageId / addressedToBot). No card code here.
+  const delivery = deliveryModeOf(core);
+  const messageEvents = createMessageEvents({
     channelId,
-    registry: openCards,
-    emitter,
-    emitMessage: (event) => core.emitConversationMessage?.(event),
+    emit: typeof core.emitConversationMessage === 'function' ? (event) => core.emitConversationMessage?.(event) : undefined,
+    delivery,
     installationKey: () => whatsAppInstallationKey(conn.ownIdentity()),
     log: (level, message, context) => core.log(level, message, context),
   });
   // Feature-detect: kernels without the send seams simply never get providers.
-  const sendProviders = createWhatsAppSendProviders({
-    emitter,
-    cards: openCards,
-    policy: { ignoreGroups, allowlist },
-    canReceiveCardAnswers,
-  });
+  const sendProviders = createWhatsAppSendProviders({ emitter, policy: { ignoreGroups, allowlist } });
   if (typeof core.registerTargetedSendProvider === 'function') {
     core.registerTargetedSendProvider(channelId, sendProviders.targeted);
   }
   if (typeof core.registerConversationSendProvider === 'function') {
     core.registerConversationSendProvider(channelId, sendProviders.conversation);
-  }
-  if (!canReceiveCardAnswers) {
-    core.log('warn', 'kernel has no emitConversationMessage — polls and question cards are not offered');
   }
 
   const roster = createWhatsAppRosterProvider({
@@ -125,11 +115,14 @@ export async function activate(ctx: PluginContext, core: CoreApi): Promise<Chann
     deviceName,
     state,
     policy: { ignoreGroups, allowlist },
-    onMessage: async (turn: IncomingTurn) => {
-      // A typed answer to an open poll or card is that answer, not a new request.
-      if (await cardReplies.tryHandle(turn)) return;
+    onMessage: async (turn: IncomingTurn, addressing) => {
+      // The kernel gets the message first (a typed answer to a poll becomes its
+      // card_answer there). Where it reads everything for a facilitation the
+      // engine drives the conversation and the channel starts no turn.
+      if (messageEvents.created(turn, addressing) === 'all') return;
       await turns.handle(turn);
     },
+    onObserved: (turn) => void messageEvents.created(turn, undefined),
     onRefused: (turn, reason) => turns.refuse(turn, reason),
     // A group is answered only when its members are readable. `partial` goes
     // on to the kernel, whose audience floor fails closed on it.
@@ -179,6 +172,24 @@ export async function activate(ctx: PluginContext, core: CoreApi): Promise<Chann
  */
 function resolveSingleAgent(ctx: PluginContext): ChatAgent | undefined {
   return getChatAgent(ctx);
+}
+
+/**
+ * What the kernel wants of a conversation: `conversationDelivery` where it has
+ * it, else `isAllMessagesSubscribed` (all or none); `undefined` when neither.
+ */
+function deliveryModeOf(
+  core: CoreApi,
+): ((conversationId: string, channelKey: string) => DeliveryMode) | undefined {
+  if (typeof core.conversationDelivery === 'function') {
+    return (conversationId, channelKey) =>
+      core.conversationDelivery?.(WHATSAPP_CHANNEL_TYPE, conversationId, channelKey) ?? 'none';
+  }
+  if (typeof core.isAllMessagesSubscribed === 'function') {
+    return (conversationId, channelKey) =>
+      core.isAllMessagesSubscribed?.(WHATSAPP_CHANNEL_TYPE, conversationId, channelKey) ? 'all' : 'none';
+  }
+  return undefined;
 }
 
 /** Parse the comma-separated allowlist into digits-only phone numbers. */

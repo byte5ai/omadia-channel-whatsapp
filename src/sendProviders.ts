@@ -1,11 +1,7 @@
 import {
   parsePrincipal,
-  renderCardAsText,
-  type CardQuestionKind,
-  type CardSupport,
   type ChannelUserRef,
   type ConversationSendProvider,
-  type QuestionCard,
   type SendProviderCapabilities,
   type TargetedDeliveryOutcome,
   type TargetedMessage,
@@ -14,42 +10,21 @@ import {
 
 import { WHATSAPP_CHANNEL_TYPE, systemAnswer, type AnswerEmitter } from './emit.js';
 import { jidToPhone } from './inbound.js';
-import { OpenCardRegistry, pollProblem, pollToCard, type OpenCardKind } from './openCards.js';
 import { attachmentLines } from './renderer.js';
 
 /**
- * Question kinds a person can answer in plain text and `parseCardReply` can
- * read back. `assignment` is left out: its candidates are the conversation
- * members, which a numbered text cannot name.
- */
-export const WHATSAPP_CARD_KINDS: readonly CardQuestionKind[] = Object.freeze([
-  'single_choice',
-  'multiple_choice',
-  'ranking',
-  'consent',
-  'text',
-  'number',
-  'date',
-]);
-
-/** One question per card: a typed reply answers exactly one question. A longer card is refused and the sender falls back to a chat ballot. */
-export const WHATSAPP_CARD_SUPPORT: CardSupport = Object.freeze({
-  kinds: WHATSAPP_CARD_KINDS,
-  maxQuestions: 1,
-  update: false,
-});
-
-/**
- * What the providers DECLARE. Deliberately absent:
+ * What the providers DECLARE: nothing. Deliberately absent:
  *  - `asChannelKey`: this installation is ONE WhatsApp number. It cannot post
  *    as another agent's own identity, and the kernel must not be told it can.
  *  - `mentions`, `aiLabel`: the kernel degrades to plain text and folds the
  *    disclosure line into the text.
- * Polls and cards are declared only when typed answers can be received.
+ *  - `poll`, `card`: the kernel posts a poll or card this channel does not
+ *    show natively as numbered text in an ordinary message, keeps the open
+ *    question and turns a typed reply into the `card_answer` (spec 2042 §5.14,
+ *    criterion 30). The plugin only reports the id of the message it sent and
+ *    emits its inbound messages with `replyToMessageId` / `addressedToBot`.
  */
-export function whatsAppSendCapabilities(canReceiveCardAnswers: boolean): SendProviderCapabilities {
-  return canReceiveCardAnswers ? { poll: true, card: WHATSAPP_CARD_SUPPORT } : {};
-}
+export const WHATSAPP_SEND_CAPABILITIES: SendProviderCapabilities = Object.freeze({});
 
 export interface SendPolicy {
   /** Groups are not posted into when the operator keeps the bot out of them. */
@@ -60,10 +35,7 @@ export interface SendPolicy {
 
 export interface WhatsAppSendProviderDeps {
   readonly emitter: Pick<AnswerEmitter, 'emit'>;
-  readonly cards: OpenCardRegistry;
   readonly policy: SendPolicy;
-  /** The kernel can take `card_answer` events (`core.emitConversationMessage`). */
-  readonly canReceiveCardAnswers: boolean;
 }
 
 const NO_NAMED_IDENTITY =
@@ -92,66 +64,24 @@ export function jidForTarget(target: { principalId: string; userRef?: ChannelUse
   return isUserJid(jid) ? jid : undefined;
 }
 
-type Built =
-  | { readonly text: string; readonly open?: { readonly kind: OpenCardKind; readonly card: QuestionCard } }
-  | { readonly refusal: TargetedDeliveryOutcome };
-
-/** Plain text of a message: its text, attachments as "label: url", and a poll or card as a numbered question. */
-function buildText(message: TargetedMessage): Built {
-  if (message.poll && message.card) {
-    return { refusal: unreachable('channel_error', 'a message is a poll or a question card, not both') };
-  }
-  let question: { kind: OpenCardKind; card: QuestionCard } | undefined;
-  if (message.poll) {
-    const problem = pollProblem(message.poll);
-    if (problem) return { refusal: unreachable('channel_error', `invalid poll: ${problem}`) };
-    question = { kind: 'poll', card: pollToCard(message.poll) };
-  } else if (message.card) {
-    const card = message.card;
-    const unsupported = card.questions.find((q) => !WHATSAPP_CARD_KINDS.includes(q.kind));
-    if (card.questions.length !== WHATSAPP_CARD_SUPPORT.maxQuestions || unsupported) {
-      return {
-        refusal: unreachable(
-          'channel_error',
-          'the WhatsApp channel posts one question per card, of a kind a typed reply can answer — nothing was posted',
-        ),
-      };
-    }
-    question = { kind: 'card', card };
-  }
-  const text = [message.text, attachmentLines(message.attachments), question ? renderCardAsText(question.card) : '']
-    .filter((part) => part.trim().length > 0)
-    .join('\n\n');
-  return { text, ...(question ? { open: question } : {}) };
-}
-
-/** Post one message as `system` (the plugin cannot name an agent here), through the single emitter. */
+/**
+ * Post one message as `system` (the plugin cannot name an agent here), through
+ * the single emitter. A poll or card is refused, not posted as plain text: the
+ * kernel converts those before they reach a channel that declares neither.
+ */
 async function deliver(
   deps: WhatsAppSendProviderDeps,
   jid: string,
   message: TargetedMessage,
 ): Promise<TargetedDeliveryOutcome> {
-  const built = buildText(message);
-  if ('refusal' in built) return built.refusal;
-  if (built.open && !deps.canReceiveCardAnswers) {
-    return unreachable('channel_error', 'the kernel cannot take typed answers on this channel — post the question as text');
+  if (message.poll || message.card) {
+    return unreachable('channel_error', 'the WhatsApp channel posts no native polls or cards — nothing was posted');
   }
+  const text = [message.text, attachmentLines(message.attachments)].filter((part) => part.trim().length > 0).join('\n\n');
   try {
-    const messageId = await deps.emitter.emit(jid, systemAnswer(built.text));
-    if (built.open) {
-      deps.cards.open({
-        kind: built.open.kind,
-        conversationId: jid,
-        card: built.open.card,
-        ...(messageId ? { messageId } : {}),
-      });
-    }
-    return {
-      outcome: 'delivered',
-      ...(messageId ? { messageId } : {}),
-      ...(built.open && messageId ? { cardMessageId: messageId } : {}),
-      conversationId: jid,
-    };
+    // The WhatsApp message id: what a reply to this message names as its quote.
+    const messageId = await deps.emitter.emit(jid, systemAnswer(text));
+    return { outcome: 'delivered', ...(messageId ? { messageId } : {}), conversationId: jid };
   } catch (err) {
     return unreachable('channel_error', (err as Error).message);
   }
@@ -167,7 +97,7 @@ export function createWhatsAppSendProviders(deps: WhatsAppSendProviderDeps): {
   readonly targeted: TargetedSendProvider;
   readonly conversation: ConversationSendProvider;
 } {
-  const supports = whatsAppSendCapabilities(deps.canReceiveCardAnswers);
+  const supports = WHATSAPP_SEND_CAPABILITIES;
   return {
     targeted: {
       channelType: WHATSAPP_CHANNEL_TYPE,
