@@ -15,7 +15,7 @@ identity:
   kind: "channel"
   domain: "whatsapp"
   name: "WhatsApp"
-  version: "0.1.9"                         # === package.json "version"
+  version: "0.2.0"                         # === package.json "version"
   description: "WhatsApp-Channel via WhatsApp Web (Baileys, QR-Linked-Device). Routet WhatsApp-Chats in den Omadia-Orchestrator."
   authors:
     - name: "byte5 GmbH"
@@ -73,6 +73,18 @@ setup:
       ### 3. Limit the reach (optional)
       *Ignore groups* keeps the bot silent in groups; the *allowlist* restricts
       it to specific phone numbers (E.164, e.g. `491701234567`).
+
+      ### 4. Choose an agent
+      This installation is **one** WhatsApp number, so all agents share it. In a
+      chat, `/agent` lists the agents available to you here and `/agent <Name>`
+      selects one; the answer is confirmed once as a system message. Where
+      several agents speak in one chat, a name line (`Mira: …`) shows who is
+      answering.
+
+      ### 5. Groups (optional)
+      With *Ignore groups* off, the bot answers in a group only when it is
+      @mentioned, replied to, or given `/agent`, and only while WhatsApp lets it
+      read the member list.
     de: |
       ## WhatsApp verknüpfen
 
@@ -99,6 +111,17 @@ setup:
       ### 3. Reichweite eingrenzen (optional)
       Mit *Gruppen ignorieren* bleibt der Bot in Gruppen still; mit der *Allowlist*
       beschränkst du ihn auf bestimmte Telefonnummern (E.164, z.B. `491701234567`).
+
+      ### 4. Agent wählen
+      Diese Installation ist **eine** WhatsApp-Nummer, alle Agenten teilen sie sich.
+      Im Chat listet `/agent` die für dich hier verfügbaren Agenten, `/agent <Name>`
+      wählt einen aus; die Antwort bestätigt das einmal als Systemnachricht. Sprechen
+      mehrere Agenten in einem Chat, zeigt eine Namenszeile (`Mira: …`), wer antwortet.
+
+      ### 5. Gruppen (optional)
+      Mit ausgeschaltetem *Gruppen ignorieren* antwortet der Bot in einer Gruppe nur,
+      wenn er @erwähnt wird, auf eine seiner Nachrichten geantwortet wird oder
+      `/agent` kommt, und nur solange WhatsApp ihm die Mitgliederliste liefert.
   fields:
     - key: "device_name"
       type: "string"
@@ -110,7 +133,7 @@ setup:
     - key: "ignore_groups"
       type: "boolean"
       label: "Gruppen ignorieren"
-      help: "Wenn aktiv, reagiert der Bot nur auf Direkt-Chats (1:1) und bleibt in Gruppen still."
+      help: "Wenn aktiv, reagiert der Bot nur auf Direkt-Chats (1:1) und bleibt in Gruppen still. Wenn aus, antwortet er in Gruppen nur auf Erwähnung, Antwort auf seine Nachricht oder /agent - und nur, wenn WhatsApp die Mitglieder liefert."
       required: false
       default: true
 
