@@ -90,6 +90,12 @@ function senderPhoneJid(msg: WAMessage, isGroup: boolean): string | undefined {
   return phone ? jidNormalizedUser(phone) : undefined;
 }
 
+/** The WhatsApp id of the message a turn came from. */
+export function messageIdOf(turn: IncomingTurn): string | undefined {
+  const key = (turn.rawEvent as { key?: { id?: string | null } } | undefined)?.key;
+  return key?.id ?? undefined;
+}
+
 /** The id of the message a message replies to, when it is a reply. */
 function quotedMessageIdOf(msg: WAMessage): string | undefined {
   const message = msg.message as Record<string, unknown> | null | undefined;

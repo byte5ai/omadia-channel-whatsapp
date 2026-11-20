@@ -11,7 +11,7 @@ import {
 
 import type { AnswerEmitter } from './emit.js';
 import { systemAnswer } from './emit.js';
-import { buildTurnOrigin, routePrincipalOf, sessionScopeOf } from './inbound.js';
+import { buildTurnOrigin, messageIdOf, routePrincipalOf, sessionScopeOf } from './inbound.js';
 import type { TurnRoute } from './routing.js';
 
 /** Why the connection did not hand a turn to an agent. */
@@ -160,9 +160,4 @@ export function createTurnHandler(deps: TurnHandlerDeps): TurnHandler {
       await emitSafely(turn.conversationId, systemAnswer(GROUP_ROSTER_UNAVAILABLE_TEXT));
     },
   };
-}
-
-function messageIdOf(turn: IncomingTurn): string | undefined {
-  const key = (turn.rawEvent as { key?: { id?: string | null } } | undefined)?.key;
-  return key?.id ?? undefined;
 }

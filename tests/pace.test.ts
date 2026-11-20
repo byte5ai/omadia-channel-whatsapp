@@ -57,7 +57,7 @@ describe('pace (spec 5.8): typing, one acknowledgement, no chatter', () => {
     const { handler, sent, typing, speakers, advance } = setup(boundRoute(d.agent, mira));
     const running = handler.handle(turn);
     await advance(7_999);
-    assert.deepEqual(sent, []);
+    assert.equal(sent.length, 0);
     await advance(2);
     await advance(120_000);
     assert.equal(sent.length, 1, 'one acknowledgement, no progress chatter');

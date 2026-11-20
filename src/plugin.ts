@@ -12,8 +12,11 @@ import {
 import type { PluginContext } from '@omadia/plugin-api';
 
 import { createAdminRouter } from './adminRouter.js';
+import { createCardReplyHandler, whatsAppInstallationKey } from './cardReplies.js';
 import { createAnswerEmitter } from './emit.js';
+import { OpenCardRegistry } from './openCards.js';
 import { createWhatsAppRosterProvider } from './roster.js';
+import { createWhatsAppSendProviders } from './sendProviders.js';
 import { PersistentSpeakerHistoryStore } from './speakerHistory.js';
 import { createTurnRouter, channelResolverOf } from './routing.js';
 import { createChannelState } from './state.js';
@@ -79,6 +82,35 @@ export async function activate(ctx: PluginContext, core: CoreApi): Promise<Chann
     log: (level, message, context) => core.log(level, message, context),
   });
 
+  // Questions posted as plain text (polls, question cards) and the typed answers
+  // to them (spec 2042 §5.14 channel parity, criterion 30).
+  const openCards = new OpenCardRegistry();
+  const canReceiveCardAnswers = typeof core.emitConversationMessage === 'function';
+  const cardReplies = createCardReplyHandler({
+    channelId,
+    registry: openCards,
+    emitter,
+    emitMessage: (event) => core.emitConversationMessage?.(event),
+    installationKey: () => whatsAppInstallationKey(conn.ownIdentity()),
+    log: (level, message, context) => core.log(level, message, context),
+  });
+  // Feature-detect: kernels without the send seams simply never get providers.
+  const sendProviders = createWhatsAppSendProviders({
+    emitter,
+    cards: openCards,
+    policy: { ignoreGroups, allowlist },
+    canReceiveCardAnswers,
+  });
+  if (typeof core.registerTargetedSendProvider === 'function') {
+    core.registerTargetedSendProvider(channelId, sendProviders.targeted);
+  }
+  if (typeof core.registerConversationSendProvider === 'function') {
+    core.registerConversationSendProvider(channelId, sendProviders.conversation);
+  }
+  if (!canReceiveCardAnswers) {
+    core.log('warn', 'kernel has no emitConversationMessage — polls and question cards are not offered');
+  }
+
   const roster = createWhatsAppRosterProvider({
     isConnected: () => conn.isConnected(),
     ownIdentity: () => conn.ownIdentity(),
@@ -99,7 +131,11 @@ export async function activate(ctx: PluginContext, core: CoreApi): Promise<Chann
     deviceName,
     state,
     policy: { ignoreGroups, allowlist },
-    onMessage: (turn: IncomingTurn) => turns.handle(turn),
+    onMessage: async (turn: IncomingTurn) => {
+      // A typed answer to an open poll or card is that answer, not a new request.
+      if (await cardReplies.tryHandle(turn)) return;
+      await turns.handle(turn);
+    },
     onRefused: (turn, reason) => turns.refuse(turn, reason),
     // A group is answered only when its members are readable. `partial` goes
     // on to the kernel, whose audience floor fails closed on it.
