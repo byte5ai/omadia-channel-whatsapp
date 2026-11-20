@@ -13,7 +13,7 @@ import {
 import type { PluginContext } from '@omadia/plugin-api';
 
 import { createAdminRouter } from './adminRouter.js';
-import { createMessageEvents, whatsAppInstallationKey, type DeliveryMode } from './conversationMessages.js';
+import { createMessageEvents, handleAddressed, whatsAppInstallationKey, type DeliveryMode } from './conversationMessages.js';
 import { WHATSAPP_CHANNEL_TYPE, createAnswerEmitter } from './emit.js';
 import { createWhatsAppRosterProvider } from './roster.js';
 import { createWhatsAppSendProviders } from './sendProviders.js';
@@ -82,6 +82,10 @@ export async function activate(ctx: PluginContext, core: CoreApi): Promise<Chann
   const messageEvents = createMessageEvents({
     channelId,
     emit: typeof core.emitConversationMessage === 'function' ? (event) => core.emitConversationMessage?.(event) : undefined,
+    report:
+      typeof core.reportConversationMessage === 'function'
+        ? (event) => core.reportConversationMessage?.(event) ?? Promise.resolve({ answeredCard: false })
+        : undefined,
     delivery,
     installationKey: () => whatsAppInstallationKey(conn.ownIdentity()),
     log: (level, message, context) => core.log(level, message, context),
@@ -115,12 +119,11 @@ export async function activate(ctx: PluginContext, core: CoreApi): Promise<Chann
     deviceName,
     state,
     policy: { ignoreGroups, allowlist },
+    // The kernel gets the message first: a typed answer to a poll becomes its
+    // card_answer and starts no turn; where it reads everything for a
+    // facilitation the engine drives and the channel starts none either.
     onMessage: async (turn: IncomingTurn, addressing) => {
-      // The kernel gets the message first (a typed answer to a poll becomes its
-      // card_answer there). Where it reads everything for a facilitation the
-      // engine drives the conversation and the channel starts no turn.
-      if (messageEvents.created(turn, addressing) === 'all') return;
-      await turns.handle(turn);
+      await handleAddressed(messageEvents, turn, addressing, () => turns.handle(turn));
     },
     onObserved: (turn) => void messageEvents.created(turn, undefined),
     onRefused: (turn, reason) => turns.refuse(turn, reason),
