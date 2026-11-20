@@ -41,8 +41,10 @@ publish before that kernel is live.
   result (`resolveChannelRoute`), also on `reject`. The singleton is read per
   turn only on a host that publishes no resolver; the activation-time lookup
   (and its "orchestrator unavailable" error) is gone.
-- **Selection key and locale.** The key passed to `resolve` is the chat JID (the
-  group, or the direct chat), the tightest key, plus the principal. A locale is
+- **Selection key and locale.** The key passed to `resolve` is the group JID, or for a
+  direct chat the phone-number JID once WhatsApp reveals it (LID otherwise), so
+  a chat reached by number and by LID is one selection; send targets are
+  unchanged, and a direct-chat binding must name the phone-number JID. Plus the principal. A locale is
   passed only if the turn states one (`metadata.locale`, normalised to
   `de`/`en`); WhatsApp states none, so notices default to German.
 - **One principal form.** The sender is `user:whatsapp-phone:<jid>`, built with

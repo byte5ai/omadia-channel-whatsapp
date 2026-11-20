@@ -191,13 +191,31 @@ describe('routing contract: bound / reject, no fallback agent', () => {
 });
 
 describe('selection key and locale (S1: tightest conversation key + principal)', () => {
-  it('the key is the chat JID: the group for a group, the sender\'s chat for a direct chat', () => {
+  it('the key is the group JID for a group and the sender\'s chat for a direct chat', () => {
     const { resolve, calls } = resolverReturning({ decision: 'reject', notice });
     const route = createTurnRouter({ resolve, singleAgent: () => undefined });
     const group = buildIncomingTurn('wa', textMessage({ jid: GROUP, participant: ANNA_PN, text: 'x' }), 'x');
     route(group, 'user:whatsapp-phone:a');
     route(direct('x'), 'user:whatsapp-phone:a');
     assert.deepEqual(calls.map((c) => c.key), [GROUP, ANNA_PN]);
+  });
+
+  it('a direct chat by number and by LID is the same selection key (the number once it is known)', () => {
+    const { resolve, calls } = resolverReturning({ decision: 'reject', notice });
+    const route = createTurnRouter({ resolve, singleAgent: () => undefined });
+    const byNumber = direct('x');
+    const byLid = buildIncomingTurn('wa', withKey(textMessage({ jid: ANNA_LID, text: 'x' }), { senderPn: ANNA_PN }), 'x');
+    const lidOnly = buildIncomingTurn('wa', textMessage({ jid: ANNA_LID, text: 'x' }), 'x');
+    for (const turn of [byNumber, byLid, lidOnly]) route(turn, 'p');
+    assert.deepEqual(calls.map((c) => c.key), [ANNA_PN, ANNA_PN, ANNA_LID]);
+    assert.equal(byLid.conversationId, ANNA_LID, 'the send target stays what WhatsApp addresses');
+  });
+
+  it('a group keeps the group JID even when the sender\'s number is known', () => {
+    const { resolve, calls } = resolverReturning({ decision: 'reject', notice });
+    const route = createTurnRouter({ resolve, singleAgent: () => undefined });
+    route(buildIncomingTurn('wa', withKey(textMessage({ jid: GROUP, participant: ANNA_LID, text: 'x' }), { participantPn: ANNA_PN }), 'x'), 'p');
+    assert.deepEqual(calls.map((c) => c.key), [GROUP]);
   });
 
   it('WhatsApp states no language, so the locale is left out; a stated one is normalised and passed on', () => {
