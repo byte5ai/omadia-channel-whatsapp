@@ -80,7 +80,8 @@ setup:
       selects one and `/agent` alone clears your selection; the answer is
       confirmed once as a system message. Where several agents speak in one
       chat, a name line (`Mira: …`) shows who is answering. Polls and questions
-      arrive as numbered text; you answer by typing the number.
+      arrive as numbered text; you answer by typing the number (in a group, reply
+      to the question).
 
       ### 5. Groups (optional)
       With *Ignore groups* off, the bot answers in a group only when it is

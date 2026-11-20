@@ -53,17 +53,23 @@ publish before that kernel is live.
   WhatsApp reveals it (`senderPn` / `participantPn`), so a direct chat and any
   LID group are one person; if only the LID is visible, the LID JID is the id
   (no number is guessed). `userRef.id` (memory keys, roster) is unchanged.
-- **Polls and question cards as plain text (criterion 30).** A targeted-send and
-  a conversation-send provider are registered (feature-detected). Polls and
-  one-question cards go out as numbered text (`renderCardAsText`); the typed
-  reply (`2`, `1,3`, `ja`, a date, ...) is read with `parseCardReply` and
-  emitted to the kernel as the same typed `card_answer` a card click produces.
-  In a group, reply to the question message (or @mention the bot); a free-text
-  question takes only a reply to it. Open questions live in memory (a restart
-  turns a late answer into an ordinary message). Providers send as `system`,
-  decline `asChannelKey` (one number cannot be another agent's identity),
-  honour `ignore_groups` and the allowlist, and return unreachability instead
-  of throwing.
+- **Polls and question cards as plain text (criterion 30) are the kernel's.** The
+  kernel posts a poll or card this channel does not show natively as numbered
+  text through `sendToConversation`, keeps the open question and turns a typed
+  reply into the `card_answer`; the plugin has no card code. A targeted-send and
+  a conversation-send provider are registered (feature-detected) and declare
+  nothing (no `poll`, `card`, `asChannelKey`, `mentions`); a poll or card that
+  reaches them anyway is refused. They send as `system`, return the WhatsApp
+  message id, decline `asChannelKey` (one number cannot be another agent's
+  identity), honour `ignore_groups` and the allowlist, and return
+  unreachability instead of throwing.
+- **`created` message events.** Inbound messages are reported to the kernel
+  (`emitConversationMessage`) with `replyToMessageId` (the quoted WhatsApp
+  message id), `addressedToBot` (direct chat, mention, reply to the bot,
+  command) and the platform-stated author. The delivery mode comes from
+  `conversationDelivery` / `isAllMessagesSubscribed`: `addressed` reports only
+  what addresses the bot, `all` also unaddressed group messages and leaves the
+  turn to the engine, `none` nothing.
 - **`compat.core` is `>=1.74.0 <2.0`** (placeholder; the final range is set with
   the release).
 - **Groups (`ignore_groups` off).** The bot answers only when @mentioned,

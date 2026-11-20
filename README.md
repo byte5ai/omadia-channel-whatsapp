@@ -49,9 +49,9 @@ Who is speaking: with one agent in a conversation there is no name line. Where s
 
 ## Polls and questions
 
-An agent can ask you a poll or a question (for example in a facilitated discussion). WhatsApp gets it as plain, numbered text, never as a button. You answer by typing: the number of an option (`2`), several numbers (`1,3`), a ranking (`2,1,3`), `ja` / `nein`, a number or a date (`2026-12-01`). In a group, reply to the question message (or @mention the bot). A free-text question takes only a message that replies to it. The typed answer reaches the agent as the same structured answer a card click would be. A message that does not answer the question is an ordinary message.
+An agent can ask you a poll or a question (for example in a facilitated discussion). WhatsApp has no native poll or card here, so the omadia kernel posts it as plain, numbered text in an ordinary message and keeps the question open. You answer by typing: the number of an option (`2`), several numbers (`1,3`), a ranking (`2,1,3`), `ja` / `nein`, a number or a date (`2026-12-01`). In a group, reply to the question message (or @mention the bot); in a direct chat a message that addresses the bot is enough when one question is open. The kernel reads the reply and turns it into the same structured answer a card click would be; a message that does not answer stays an ordinary message. The plugin has no card code of its own: it reports the id of the message it sent and tells the kernel about every inbound message with the message it quotes (`replyToMessageId`) and whether it addresses the bot (`addressedToBot`). Where the kernel reads every message of a group for a facilitation, the plugin also reports unaddressed group messages and starts no turn of its own for addressed ones.
 
-The plugin registers a targeted and a conversation send provider with the kernel for this: messages go out as `system` text, cards are limited to one question of a kind a typed reply can answer (no assignment questions), and the plugin never sends as another agent's own identity (one number).
+The plugin registers a targeted and a conversation send provider for this. They declare nothing special: messages go out as `system` text, and the plugin never sends as another agent's own identity (one number).
 
 ## Groups
 
