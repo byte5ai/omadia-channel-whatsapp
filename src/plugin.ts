@@ -73,6 +73,7 @@ export async function activate(ctx: PluginContext, core: CoreApi): Promise<Chann
     // (per-conversation), else the platform fallback Agent, else the default.
     agentFor: (turn) => resolveAgentForTurn(ctx, 'whatsapp', [turn.conversationId], agent),
     emitter,
+    sendTyping: (jid) => conn.sendTyping(jid),
     log: (level, message, context) => core.log(level, message, context),
   });
 

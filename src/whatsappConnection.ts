@@ -280,9 +280,8 @@ export class WhatsAppConnection {
           continue;
         }
 
-        // Pace (spec 2042 §5.8): the typing indicator shows the message was
-        // picked up. No receipt reaction — it is not a declared decoration.
-        void this.sendTyping(remoteJid);
+        // No receipt reaction (not a declared decoration). The turn handler
+        // shows the typing indicator and paces long work (spec 2042 §5.8).
         await this.deps.onMessage(turn);
       } catch (err) {
         this.deps.log('error', 'error handling inbound WhatsApp message', {

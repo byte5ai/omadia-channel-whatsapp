@@ -1,9 +1,12 @@
 import {
   isNoReply,
   logNoReplyDrop,
+    runPacedTurn,
+  type ChannelPaceProfile,
   type ChatAgent,
   type IncomingTurn,
   type LogLevel,
+  type PaceClock,
   type SemanticAnswer,
 } from '@omadia/channel-sdk';
 
@@ -18,6 +21,17 @@ export const TURN_FAILED_TEXT = 'Dabei ist ein Fehler aufgetreten. Bitte versuch
 export const GROUP_ROSTER_UNAVAILABLE_TEXT =
   'In dieser Gruppe kann ich nicht antworten: WhatsApp liefert mir gerade die Mitgliederliste nicht, und ohne sie weiß ich nicht, wer mitliest.';
 
+/**
+ * Pace (spec 2042 §5.8): typing from the start, exactly one acknowledgement
+ * after `ackThresholdMs`, no progress chatter. WhatsApp has no reply window
+ * (the answer is a normal message whenever it is ready), so no `replyWindowMs`.
+ * The typing presence lapses on its own after a few seconds, so it is renewed.
+ */
+export const WHATSAPP_PACE_PROFILE: ChannelPaceProfile = Object.freeze({
+  ackThresholdMs: 8_000,
+  typingIntervalMs: 8_000,
+});
+
 /** One refusal notice per conversation per window, so a busy group is not answered with notices. */
 export const REFUSAL_NOTICE_WINDOW_MS = 10 * 60_000;
 
@@ -26,6 +40,11 @@ export interface TurnHandlerDeps {
   readonly agentFor: (turn: IncomingTurn) => ChatAgent;
   readonly emitter: AnswerEmitter;
   readonly log: (level: LogLevel, message: string, context?: Record<string, unknown>) => void;
+  /** Show the "composing" presence in a chat. Presence, not a message. */
+  readonly sendTyping?: (jid: string) => Promise<void>;
+  readonly pace?: ChannelPaceProfile;
+  /** Timer seam for tests. */
+  readonly clock?: PaceClock;
   readonly now?: () => number;
 }
 
@@ -58,12 +77,27 @@ export function createTurnHandler(deps: TurnHandlerDeps): TurnHandler {
   return {
     async handle(turn) {
       try {
-        const answer = await deps.agentFor(turn).chat({
-          userMessage: turn.text,
-          sessionScope: sessionScopeOf(turn.conversationId),
-          userId: turn.userRef.id,
-          origin: buildTurnOrigin(turn, messageIdOf(turn)),
-        });
+        const agent = deps.agentFor(turn);
+        const jid = turn.conversationId;
+        const { result: answer } = await runPacedTurn(
+          () =>
+            agent.chat({
+              userMessage: turn.text,
+              sessionScope: sessionScopeOf(jid),
+              userId: turn.userRef.id,
+              origin: buildTurnOrigin(turn, messageIdOf(turn)),
+            }),
+          deps.pace ?? WHATSAPP_PACE_PROFILE,
+          {
+            ...(deps.sendTyping ? { sendTyping: () => deps.sendTyping?.(jid) } : {}),
+            // The plugin cannot name the routed agent before its answer, so the
+            // one acknowledgement is a plain `system` text from the pace template.
+            sendAck: (text) => emitSafely(jid, systemAnswer(text)),
+            onHookError: (hook, error) =>
+              deps.log('warn', 'WhatsApp pace hook failed', { hook, error: (error as Error).message }),
+          },
+          deps.clock ? { clock: deps.clock } : {},
+        );
         if (isNoReply(answer)) {
           logNoReplyDrop(turn.channelId, { conversationId: turn.conversationId });
           return;
