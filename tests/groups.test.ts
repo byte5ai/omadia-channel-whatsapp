@@ -38,11 +38,10 @@ describe('group etiquette (spec 5.8): answer only when addressed', () => {
   });
 
   it('treats /agent as addressed even without a mention (the command is for the bot)', () => {
-    for (const text of ['/agent', '/agent Mira', '/AGENT mira']) {
+    for (const text of ['/agent', '/agent Mira', '/AGENT mira', '/agents', '/Agents']) {
       const msg = textMessage({ jid: GROUP, participant: ANNA, text });
       assert.equal(groupAddressing(msg, text, OWN), 'agent_command');
     }
-    assert.equal(isAgentCommand('/agents'), false);
     assert.equal(isAgentCommand('/agentur'), false);
   });
 

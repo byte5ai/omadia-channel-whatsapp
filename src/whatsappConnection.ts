@@ -312,10 +312,12 @@ export class WhatsAppConnection {
    * The raw send primitive. Only `emit.ts` calls it (`emitter.test.ts`
    * enforces that), so every message carries a speaker.
    */
-  async sendText(jid: string, text: string): Promise<void> {
+  async sendText(jid: string, text: string): Promise<string | undefined> {
     if (!this.sock) throw new Error('WhatsApp socket not connected');
     const sent = await this.sock.sendMessage(jid, { text });
-    if (sent?.key?.id) this.recordSent(sent.key.id);
+    const id = sent?.key?.id ?? undefined;
+    if (id) this.recordSent(id);
+    return id;
   }
 
   /** Remember an id we emitted so its `messages.upsert` echo is ignored. Bounded. */

@@ -1,9 +1,8 @@
 import {
   isNoReply,
   logNoReplyDrop,
-    runPacedTurn,
+  runPacedTurn,
   type ChannelPaceProfile,
-  type ChatAgent,
   type IncomingTurn,
   type LogLevel,
   type PaceClock,
@@ -12,11 +11,13 @@ import {
 
 import type { AnswerEmitter } from './emit.js';
 import { systemAnswer } from './emit.js';
-import { buildTurnOrigin, sessionScopeOf } from './inbound.js';
+import { buildTurnOrigin, routePrincipalOf, sessionScopeOf } from './inbound.js';
+import type { TurnRoute } from './routing.js';
 
 /** Why the connection did not hand a turn to an agent. */
 export type TurnRefusal = 'group_roster_unavailable';
 
+export const NO_AGENT_TEXT = 'Hier antwortet gerade kein Agent.';
 export const TURN_FAILED_TEXT = 'Dabei ist ein Fehler aufgetreten. Bitte versuche es erneut.';
 export const GROUP_ROSTER_UNAVAILABLE_TEXT =
   'In dieser Gruppe kann ich nicht antworten: WhatsApp liefert mir gerade die Mitgliederliste nicht, und ohne sie weiß ich nicht, wer mitliest.';
@@ -36,8 +37,8 @@ export const WHATSAPP_PACE_PROFILE: ChannelPaceProfile = Object.freeze({
 export const REFUSAL_NOTICE_WINDOW_MS = 10 * 60_000;
 
 export interface TurnHandlerDeps {
-  /** The agent that serves this turn (operator binding, platform fallback, or default). */
-  readonly agentFor: (turn: IncomingTurn) => ChatAgent;
+  /** Who answers this turn: the platform's decision for the conversation and the sender's principal. */
+  readonly route: (turn: IncomingTurn, principal: string) => TurnRoute;
   readonly emitter: AnswerEmitter;
   readonly log: (level: LogLevel, message: string, context?: Record<string, unknown>) => void;
   /** Show the "composing" presence in a chat. Presence, not a message. */
@@ -54,10 +55,19 @@ export interface TurnHandler {
 }
 
 /**
- * Drives one orchestrator turn and ships the answer back through the single
- * emitter. The text goes to the kernel unchanged: `/agent …` is parsed by the
- * management layer there, and its reply arrives as a `system` notice in the
- * `SemanticAnswer`.
+ * Drives one turn and ships the answer back through the single emitter. The
+ * text goes to the agent the platform's resolver returned unchanged: `/agent`,
+ * `/agent <Name>` and `/agents` are carried out by that agent, and its reply
+ * arrives as a `system` notice in the `SemanticAnswer`.
+ *
+ * - `bound`: the agent answers. The one pace acknowledgement goes out under the
+ *   agent's own speaker (`route.speaker`, known before the answer), in its name.
+ * - `reject`: nobody answers. The resolver's agent still receives the text (it
+ *   handles `/agent`), but whatever comes back is posted as `system`: a reject
+ *   never produces an agent's answer. Where the platform gave no agent, the
+ *   `notice` is posted directly as `system`.
+ * - An answer without a speaker is not sent (INV-4); the user gets the
+ *   `system` failure text instead (fail-closed, see `MissingSpeakerError`).
  */
 export function createTurnHandler(deps: TurnHandlerDeps): TurnHandler {
   const now = deps.now ?? Date.now;
@@ -74,25 +84,46 @@ export function createTurnHandler(deps: TurnHandlerDeps): TurnHandler {
     }
   }
 
+  /** The notice of a reject, as the one `system` message it is. */
+  function rejectAnswer(route: TurnRoute): SemanticAnswer {
+    return {
+      text: route.notice?.text ?? NO_AGENT_TEXT,
+      speaker: { kind: 'system' },
+      ...(route.notice ? { systemNotice: route.notice } : {}),
+    };
+  }
+
   return {
     async handle(turn) {
       try {
-        const agent = deps.agentFor(turn);
         const jid = turn.conversationId;
+        const origin = buildTurnOrigin(turn, messageIdOf(turn));
+        const route = deps.route(turn, routePrincipalOf(turn, origin));
+        const agent = route.chatAgent;
+        if (!agent) {
+          if (route.decision === 'reject') {
+            await deps.emitter.emit(jid, rejectAnswer(route));
+            return;
+          }
+          throw new Error('the platform bound this turn to an agent but returned none');
+        }
+        // The agent's own speaker is known up front only for a bound turn.
+        const ackSpeaker = route.decision === 'bound' ? route.speaker : undefined;
         const { result: answer } = await runPacedTurn(
           () =>
             agent.chat({
               userMessage: turn.text,
               sessionScope: sessionScopeOf(jid),
               userId: turn.userRef.id,
-              origin: buildTurnOrigin(turn, messageIdOf(turn)),
+              origin,
             }),
           deps.pace ?? WHATSAPP_PACE_PROFILE,
           {
             ...(deps.sendTyping ? { sendTyping: () => deps.sendTyping?.(jid) } : {}),
-            // The plugin cannot name the routed agent before its answer, so the
-            // one acknowledgement is a plain `system` text from the pace template.
-            sendAck: (text) => emitSafely(jid, systemAnswer(text)),
+            // One acknowledgement, in the routed agent's name (its words from
+            // the pace template); `system` only where no agent is known yet.
+            sendAck: (text) =>
+              emitSafely(jid, { text, speaker: ackSpeaker ?? { kind: 'system' } }),
             onHookError: (hook, error) =>
               deps.log('warn', 'WhatsApp pace hook failed', { hook, error: (error as Error).message }),
           },
@@ -102,10 +133,18 @@ export function createTurnHandler(deps: TurnHandlerDeps): TurnHandler {
           logNoReplyDrop(turn.channelId, { conversationId: turn.conversationId });
           return;
         }
-        await deps.emitter.emit(turn.conversationId, answer);
+        if (route.decision === 'reject' && answer.speaker?.kind !== 'system') {
+          deps.log('error', 'a rejected turn produced a non-system answer; posting the notice instead', {
+            conversationId: jid,
+          });
+          await deps.emitter.emit(jid, rejectAnswer(route));
+          return;
+        }
+        await deps.emitter.emit(jid, answer);
       } catch (err) {
         deps.log('error', 'failed to handle WhatsApp turn', {
           error: (err as Error).message,
+          errorName: (err as Error).name,
           conversationId: turn.conversationId,
         });
         // Fail loud (INV-7): the user is told, as the system, never as an agent.

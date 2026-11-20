@@ -24,7 +24,13 @@ export const WHATSAPP_DECORATIONS: readonly { readonly id: string }[] = Object.f
   { id: 'ai_disclosure_line' },
 ]);
 
-/** A message without a speaker is never sent (INV-4: a path that cannot name its speaker cannot emit). */
+/**
+ * A message without a speaker is never sent (INV-4: a path that cannot name its
+ * speaker cannot emit). Fail-closed on purpose: sending it anyway would put
+ * words in the chat that nobody answers for, and a made-up `system` label would
+ * be a claim the plugin cannot back. The turn handler turns the refusal into a
+ * `system` failure text, so the user is never left in silence.
+ */
 export class MissingSpeakerError extends Error {
   constructor() {
     super('answer carries no speaker (agent or system); refusing to send it');
@@ -56,15 +62,18 @@ export function renderWhatsAppText(
 }
 
 export interface EmitterDeps {
-  /** The one raw send primitive (`WhatsAppConnection.sendText`). */
-  readonly sendText: (jid: string, text: string) => Promise<void>;
+  /** The one raw send primitive (`WhatsAppConnection.sendText`); resolves to the WhatsApp message id when known. */
+  readonly sendText: (jid: string, text: string) => Promise<string | undefined | void>;
   readonly speakerHistory: SpeakerHistoryStore;
   readonly onDecorationRefused?: (refusal: DecorationRefusal) => void;
 }
 
 export interface AnswerEmitter {
-  /** Render and send one answer. Throws {@link MissingSpeakerError} without a speaker. */
-  emit(jid: string, answer: SemanticAnswer): Promise<void>;
+  /**
+   * Render and send one answer; resolves to the WhatsApp message id when known.
+   * Throws {@link MissingSpeakerError} without a speaker.
+   */
+  emit(jid: string, answer: SemanticAnswer): Promise<string | undefined>;
 }
 
 /**
@@ -85,8 +94,8 @@ export function createAnswerEmitter(deps: EmitterDeps): AnswerEmitter {
     async emit(jid, answer) {
       if (!answer.speaker) throw new MissingSpeakerError();
       const text = renderWhatsAppText(answer, jid, deps.speakerHistory);
-      if (text.length === 0) return;
-      await deps.sendText(jid, text);
+      if (text.length === 0) return undefined;
+      return (await deps.sendText(jid, text)) ?? undefined;
     },
   };
 }

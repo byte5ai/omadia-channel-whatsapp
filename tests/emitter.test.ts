@@ -16,7 +16,7 @@ import {
   TURN_FAILED_TEXT,
   createTurnHandler,
 } from '../src/turnHandler.js';
-import { fakeAgent, mira } from './helpers.js';
+import { boundRoute, fakeAgent, mira } from './helpers.js';
 
 const SRC = join(import.meta.dirname, '..', 'src');
 const sources = readdirSync(SRC)
@@ -82,7 +82,7 @@ describe('criterion 5: every WhatsApp output carries a speaker (agent or system)
     const logs: string[] = [];
     let clock = 0;
     const handler = createTurnHandler({
-      agentFor: () => fakeAgent([{ text: 'Erledigt.', speaker: mira }]),
+      route: boundRoute(fakeAgent([{ text: 'Erledigt.', speaker: mira }])),
       emitter,
       log: (_l, m) => void logs.push(m),
       now: () => clock,
@@ -92,7 +92,7 @@ describe('criterion 5: every WhatsApp output carries a speaker (agent or system)
     assert.equal(speakers.at(-1)?.kind, 'agent');
 
     const failing = createTurnHandler({
-      agentFor: () => fakeAgent([]), // chat() throws
+      route: boundRoute(fakeAgent([])), // chat() throws
       emitter,
       log: (_l, m) => void logs.push(m),
     });
@@ -118,7 +118,7 @@ describe('criterion 5: every WhatsApp output carries a speaker (agent or system)
   it('tells the user when the kernel delivers an answer without a speaker (fail loud, nothing unattributed)', async () => {
     const { emitter, sent, speakers } = recordingEmitter();
     const handler = createTurnHandler({
-      agentFor: () => fakeAgent([{ text: 'no speaker here' }]),
+      route: boundRoute(fakeAgent([{ text: 'no speaker here' }])),
       emitter,
       log: () => {},
     });
@@ -131,7 +131,7 @@ describe('criterion 5: every WhatsApp output carries a speaker (agent or system)
   it('stays silent on NO_REPLY', async () => {
     const { emitter, sent } = recordingEmitter();
     const handler = createTurnHandler({
-      agentFor: () => fakeAgent([{ text: 'NO_REPLY', speaker: mira }]),
+      route: boundRoute(fakeAgent([{ text: 'NO_REPLY', speaker: mira }])),
       emitter,
       log: () => {},
     });
@@ -142,7 +142,7 @@ describe('criterion 5: every WhatsApp output carries a speaker (agent or system)
   it('hands the kernel the conversation context: origin with group statement, user, scope', async () => {
     const { emitter } = recordingEmitter();
     const agent = fakeAgent([{ text: 'ok', speaker: mira }]);
-    const handler = createTurnHandler({ agentFor: () => agent, emitter, log: () => {} });
+    const handler = createTurnHandler({ route: boundRoute(agent), emitter, log: () => {} });
     await handler.handle({ ...turn('/agent Mira'), conversationId: '1203@g.us', conversationType: 'group' });
     const input = agent.inputs[0]!;
     assert.equal(input['userMessage'], '/agent Mira');

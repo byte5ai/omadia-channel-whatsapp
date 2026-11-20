@@ -15,6 +15,7 @@ import { createAdminRouter } from './adminRouter.js';
 import { createAnswerEmitter } from './emit.js';
 import { createWhatsAppRosterProvider } from './roster.js';
 import { PersistentSpeakerHistoryStore } from './speakerHistory.js';
+import { createTurnRouter, channelResolverOf } from './routing.js';
 import { createChannelState } from './state.js';
 import { createTurnHandler } from './turnHandler.js';
 import { WhatsAppConnection } from './whatsappConnection.js';
@@ -69,9 +70,10 @@ export async function activate(ctx: PluginContext, core: CoreApi): Promise<Chann
       core.log('error', 'WhatsApp decoration refused by the registry', { ...refusal }),
   });
   const turns = createTurnHandler({
-    // US7 — route to the Agent the operator bound to this WhatsApp chat
-    // (per-conversation), else the platform fallback Agent, else the default.
-    agentFor: (turn) => resolveAgentForTurn(ctx, 'whatsapp', [turn.conversationId], agent),
+    // The platform's channelResolver decides per turn and per sender (bound
+    // agent + speaker, or reject + notice); there is no fallback agent. The
+    // singleton orchestrator is used only when no resolver is published.
+    route: createTurnRouter({ resolver: () => channelResolverOf(ctx), singleAgent: agent }),
     emitter,
     sendTyping: (jid) => conn.sendTyping(jid),
     log: (level, message, context) => core.log(level, message, context),
@@ -153,55 +155,6 @@ function resolveChatAgent(ctx: PluginContext): ChatAgent | undefined {
     .getChatAgent;
   if (helper) return helper(ctx);
   return ctx.services.get<{ agent: ChatAgent }>('chatAgent')?.agent;
-}
-
-/**
- * Structural view of the kernel's `channelResolver@1` — the per-binding router
- * published by the multi-orchestrator runtime. Consumed directly (not via a
- * new SDK export) so this plugin keeps running on hosts whose
- * `@omadia/channel-sdk` predates the US7 helper; the service itself is what the
- * helper wraps.
- */
-interface ChannelBindingResolver {
-  resolve(
-    channelType: string,
-    channelKey: string,
-  ): { readonly decision: 'bound' | 'fallback' | 'reject'; readonly chatAgent?: ChatAgent };
-}
-
-const CHANNEL_RESOLVER_SERVICE = 'channelResolver';
-
-/**
- * US7 per-turn Agent resolution. Routes a turn to the Agent the operator bound
- * to its `(channelType, channelKey)` via `channelResolver@1`, falling back to
- * `defaultAgent` when no binding (and no platform fallback Agent) matches OR
- * the resolver is not published (single-Agent / pre-US7 host). `channelKeys`
- * are tried most-specific first: a `bound` decision wins immediately, a
- * `fallback` is remembered and used only if no key is explicitly bound.
- * Resolver errors are swallowed (default agent used) so a hiccup never drops a
- * turn. Without this, every turn reaches the shared, fully-tooled singleton
- * regardless of which Agent the channel is bound to.
- */
-function resolveAgentForTurn(
-  ctx: PluginContext,
-  channelType: string,
-  channelKeys: ReadonlyArray<string | null | undefined>,
-  defaultAgent: ChatAgent,
-): ChatAgent {
-  const resolver = ctx.services.get<ChannelBindingResolver>(CHANNEL_RESOLVER_SERVICE);
-  if (!resolver) return defaultAgent;
-  let fallback: ChatAgent | undefined;
-  try {
-    for (const key of channelKeys) {
-      if (!key) continue;
-      const decision = resolver.resolve(channelType, key);
-      if (decision.decision === 'bound' && decision.chatAgent) return decision.chatAgent;
-      if (decision.decision === 'fallback' && decision.chatAgent) fallback ??= decision.chatAgent;
-    }
-  } catch {
-    return defaultAgent;
-  }
-  return fallback ?? defaultAgent;
 }
 
 /** Parse the comma-separated allowlist into digits-only phone numbers. */

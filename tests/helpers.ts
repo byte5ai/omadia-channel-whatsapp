@@ -1,4 +1,6 @@
 import type { ChatAgent, PaceClock, SemanticAnswer } from '@omadia/channel-sdk';
+
+import type { TurnRoute } from '../src/routing.js';
 import type { WAMessage } from '@whiskeysockets/baileys';
 
 export const OWN = { jid: '4915100000000@s.whatsapp.net', lid: '99887766@lid' } as const;
@@ -107,4 +109,9 @@ export function deferredAgent(): { agent: ChatAgent; release: (a: SemanticAnswer
       }),
   } as unknown as ChatAgent;
   return { agent, release: (a) => release(a), fail: (e) => fail(e) };
+}
+
+/** The platform bound the turn to `agent`; `speaker` is the agent it will answer as, known up front. */
+export function boundRoute(agent: ChatAgent, speaker: TurnRoute['speaker'] | null = mira): () => TurnRoute {
+  return () => ({ decision: 'bound', chatAgent: agent, ...(speaker ? { speaker } : {}) });
 }

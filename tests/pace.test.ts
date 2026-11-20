@@ -5,7 +5,7 @@ import { InMemorySpeakerHistoryStore, paceAckText, type IncomingTurn } from '@om
 
 import { createAnswerEmitter } from '../src/emit.js';
 import { TURN_FAILED_TEXT, WHATSAPP_PACE_PROFILE, createTurnHandler } from '../src/turnHandler.js';
-import { deferredAgent, fakeAgent, manualClock, mira } from './helpers.js';
+import { boundRoute, deferredAgent, fakeAgent, manualClock, mira } from './helpers.js';
 
 const JID = '4917@s.whatsapp.net';
 const turn: IncomingTurn = {
@@ -16,7 +16,7 @@ const turn: IncomingTurn = {
   text: 'Erstelle den Bericht',
 };
 
-function setup(agent: Parameters<typeof createTurnHandler>[0]['agentFor']) {
+function setup(route: Parameters<typeof createTurnHandler>[0]['route']) {
   const sent: string[] = [];
   const typing: string[] = [];
   const speakers: unknown[] = [];
@@ -26,7 +26,7 @@ function setup(agent: Parameters<typeof createTurnHandler>[0]['agentFor']) {
     speakerHistory: new InMemorySpeakerHistoryStore(),
   });
   const handler = createTurnHandler({
-    agentFor: agent,
+    route,
     emitter: {
       emit: (jid, answer) => {
         speakers.push(answer.speaker);
@@ -46,31 +46,44 @@ describe('pace (spec 5.8): typing, one acknowledgement, no chatter', () => {
   });
 
   it('a fast answer: typing shown, no acknowledgement', async () => {
-    const { handler, sent, typing } = setup(() => fakeAgent([{ text: 'Fertig.', speaker: mira }]));
+    const { handler, sent, typing } = setup(boundRoute(fakeAgent([{ text: 'Fertig.', speaker: mira }])));
     await handler.handle(turn);
     assert.deepEqual(typing, [JID]);
     assert.deepEqual(sent, ['Fertig.']);
   });
 
-  it('slow work: typing renewed, exactly one acknowledgement as system text, then the answer', async () => {
+  it('slow work: typing renewed, exactly one acknowledgement in the routed agent\'s name, then the answer', async () => {
     const d = deferredAgent();
-    const { handler, sent, typing, speakers, advance } = setup(() => d.agent);
+    const { handler, sent, typing, speakers, advance } = setup(boundRoute(d.agent, mira));
     const running = handler.handle(turn);
     await advance(7_999);
     assert.deepEqual(sent, []);
     await advance(2);
     await advance(120_000);
-    assert.deepEqual(sent, [paceAckText(undefined)], 'one acknowledgement, no progress chatter');
+    assert.equal(sent.length, 1, 'one acknowledgement, no progress chatter');
+    assert.ok(sent[0]!.includes(paceAckText(undefined)), 'the pace template, no model call');
     assert.ok(typing.length > 3, `typing renewed (${String(typing.length)}x)`);
     d.release({ text: 'Der Bericht liegt vor.', speaker: mira });
     await running;
-    assert.deepEqual(sent, [paceAckText(undefined), 'Der Bericht liegt vor.']);
-    assert.deepEqual(speakers, [{ kind: 'system' }, mira], 'the acknowledgement is attributed too');
+    assert.equal(sent.length, 2);
+    assert.equal(sent[1], 'Der Bericht liegt vor.', 'the name line was already shown with the acknowledgement');
+    assert.deepEqual(speakers, [mira, mira], 'the acknowledgement is the agent\'s, not the system\'s');
+  });
+
+  it('the acknowledgement is system text only where the routed agent is not known up front', async () => {
+    const d = deferredAgent();
+    const { handler, sent, speakers, advance } = setup(boundRoute(d.agent, null));
+    const running = handler.handle(turn);
+    await advance(9_000);
+    assert.deepEqual(sent, [paceAckText(undefined)]);
+    assert.deepEqual(speakers, [{ kind: 'system' }]);
+    d.release({ text: 'ok', speaker: mira });
+    await running;
   });
 
   it('typing stops once the turn is over', async () => {
     const d = deferredAgent();
-    const { handler, typing, advance } = setup(() => d.agent);
+    const { handler, typing, advance } = setup(boundRoute(d.agent));
     const running = handler.handle(turn);
     d.release({ text: 'ok', speaker: mira });
     await running;
@@ -81,11 +94,13 @@ describe('pace (spec 5.8): typing, one acknowledgement, no chatter', () => {
 
   it('work that fails after the acknowledgement ends in a system error text, not silence', async () => {
     const d = deferredAgent();
-    const { handler, sent, advance } = setup(() => d.agent);
+    const { handler, sent, advance } = setup(boundRoute(d.agent));
     const running = handler.handle(turn);
     await advance(9_000);
     d.fail(new Error('agent failed'));
     await running;
-    assert.deepEqual(sent, [paceAckText(undefined), TURN_FAILED_TEXT]);
+    assert.equal(sent.length, 2);
+    assert.ok(sent[0]!.includes(paceAckText(undefined)));
+    assert.equal(sent[1], TURN_FAILED_TEXT, 'the failure is the system\'s, never the agent\'s');
   });
 });

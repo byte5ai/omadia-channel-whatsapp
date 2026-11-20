@@ -7,7 +7,7 @@ import { createAnswerEmitter, renderWhatsAppText } from '../src/emit.js';
 import { buildIncomingTurn } from '../src/inbound.js';
 import { PersistentSpeakerHistoryStore } from '../src/speakerHistory.js';
 import { createTurnHandler } from '../src/turnHandler.js';
-import { fakeAgent, jonas, mira, textMessage } from './helpers.js';
+import { boundRoute, fakeAgent, jonas, mira, textMessage } from './helpers.js';
 
 function render(answer: SemanticAnswer, history = new InMemorySpeakerHistoryStore()): string {
   return renderWhatsAppText(answer, 'conv', history);
@@ -112,7 +112,7 @@ describe('criteria 29/30: plain text and channel parity', () => {
       ]);
       const sent: string[] = [];
       const handler = createTurnHandler({
-        agentFor: () => agent,
+        route: boundRoute(agent),
         emitter: createAnswerEmitter({
           sendText: async (_j, t) => void sent.push(t),
           speakerHistory: new InMemorySpeakerHistoryStore(),

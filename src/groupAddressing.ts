@@ -7,11 +7,12 @@ export interface OwnIdentity {
 }
 
 /**
- * The agent-selection command (`/agent` lists, `/agent <Name>` selects). The
- * KERNEL's management layer parses it; this plugin only recognises the prefix
- * so a group message that starts with it counts as addressed to the bot.
+ * The agent commands: `/agent <Name>` selects, `/agent` alone clears the
+ * selection, `/agents` lists the available agents. The ChatAgent the channel
+ * resolver returns carries them out; this plugin only recognises the prefix so
+ * a group message that starts with one counts as addressed to the bot.
  */
-const AGENT_COMMAND = /^\/agent(?:\s|$)/i;
+const AGENT_COMMAND = /^\/agents?(?:\s|$)/i;
 
 export function isAgentCommand(text: string): boolean {
   return AGENT_COMMAND.test(text.trim());
