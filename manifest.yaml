@@ -15,7 +15,7 @@ identity:
   kind: "channel"
   domain: "whatsapp"
   name: "WhatsApp"
-  version: "0.2.0"                         # === package.json "version"
+  version: "0.2.1"                         # === package.json "version"
   description: "WhatsApp-Channel via WhatsApp Web (Baileys, QR-Linked-Device). Routet WhatsApp-Chats in den Omadia-Orchestrator."
   authors:
     - name: "byte5 GmbH"
@@ -169,6 +169,10 @@ permissions:
       - "web.whatsapp.com"
       - "*.whatsapp.net"
       - "*.whatsapp.com"
+      # Baileys looks up the current WhatsApp Web version before it connects
+      # (fetchLatestBaileysVersion). Without it the bundled, possibly stale
+      # version is used and WhatsApp may refuse the linked device.
+      - "raw.githubusercontent.com"
   filesystem:
     scratch: false
 
