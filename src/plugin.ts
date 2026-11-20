@@ -3,8 +3,7 @@ import { fileURLToPath } from 'node:url';
 
 import * as channelSdk from '@omadia/channel-sdk';
 import {
-  isNoReply,
-  logNoReplyDrop,
+  rosterStatusOf,
   type ChatAgent,
   type ChannelHandle,
   type CoreApi,
@@ -13,8 +12,11 @@ import {
 import type { PluginContext } from '@omadia/plugin-api';
 
 import { createAdminRouter } from './adminRouter.js';
-import { renderAnswer } from './renderer.js';
+import { createAnswerEmitter } from './emit.js';
+import { createWhatsAppRosterProvider } from './roster.js';
+import { PersistentSpeakerHistoryStore } from './speakerHistory.js';
 import { createChannelState } from './state.js';
+import { createTurnHandler } from './turnHandler.js';
 import { WhatsAppConnection } from './whatsappConnection.js';
 
 /**
@@ -47,10 +49,46 @@ export async function activate(ctx: PluginContext, core: CoreApi): Promise<Chann
 
   const state = createChannelState();
 
-  // `let conn!` so the onMessage closure can reference the instance it is
-  // attached to; the closure only fires once messages arrive (long after
+  // `let conn!` so the closures below can reference the instance they are
+  // attached to; they only fire once messages arrive (long after
   // construction), by which time `conn` is assigned.
   let conn!: WhatsAppConnection;
+
+  // One identity per installation (one linked number), so the plain name line
+  // (INV-4) is what tells several agents apart. The history survives restarts.
+  const speakerHistory = new PersistentSpeakerHistoryStore(
+    ctx.memory.pluginWide ?? ctx.memory,
+    (message, error) => core.log('warn', message, { error: (error as Error).message }),
+  );
+  await speakerHistory.load();
+
+  const emitter = createAnswerEmitter({
+    sendText: (jid, text) => conn.sendText(jid, text),
+    speakerHistory,
+    onDecorationRefused: (refusal) =>
+      core.log('error', 'WhatsApp decoration refused by the registry', { ...refusal }),
+  });
+  const turns = createTurnHandler({
+    // US7 — route to the Agent the operator bound to this WhatsApp chat
+    // (per-conversation), else the platform fallback Agent, else the default.
+    agentFor: (turn) => resolveAgentForTurn(ctx, 'whatsapp', [turn.conversationId], agent),
+    emitter,
+    log: (level, message, context) => core.log(level, message, context),
+  });
+
+  const roster = createWhatsAppRosterProvider({
+    isConnected: () => conn.isConnected(),
+    ownIdentity: () => conn.ownIdentity(),
+    groupMetadata: (groupJid) => conn.groupMetadata(groupJid),
+  });
+  // Feature-detect: kernels that predate the roster seam simply never get a
+  // provider and keep treating every conversation as direct.
+  if (typeof core.registerRosterProvider === 'function') {
+    core.registerRosterProvider(channelId, roster);
+  } else {
+    core.log('warn', 'kernel has no registerRosterProvider — groups cannot be audience-checked');
+  }
+
   conn = new WhatsAppConnection({
     channelId,
     memory: ctx.memory,
@@ -58,7 +96,14 @@ export async function activate(ctx: PluginContext, core: CoreApi): Promise<Chann
     deviceName,
     state,
     policy: { ignoreGroups, allowlist },
-    onMessage: (turn) => handleTurn(ctx, agent, core, conn, turn),
+    onMessage: (turn: IncomingTurn) => turns.handle(turn),
+    onRefused: (turn, reason) => turns.refuse(turn, reason),
+    // A group is answered only when its members are readable. `partial` goes
+    // on to the kernel, whose audience floor fails closed on it.
+    canAnswerGroup: async (groupJid) =>
+      rosterStatusOf((await roster.getRoster(groupJid, { fresh: true })) ?? { partial: true, status: 'unknown' }) !==
+      'unknown',
+    onGroupMembershipChanged: (groupJid) => roster.invalidate(groupJid),
   });
 
   // QR / status admin UI. web-ui renders this as an iframe (manifest
@@ -89,48 +134,9 @@ export async function activate(ctx: PluginContext, core: CoreApi): Promise<Chann
     async close() {
       disposeRoutes();
       await conn.close();
+      await speakerHistory.flush();
     },
   };
-}
-
-/** Drive one orchestrator turn and ship the rendered answer back to WhatsApp. */
-async function handleTurn(
-  ctx: PluginContext,
-  defaultAgent: ChatAgent,
-  core: CoreApi,
-  conn: WhatsAppConnection,
-  turn: IncomingTurn,
-): Promise<void> {
-  // US7 — route to the Agent the operator bound to this WhatsApp chat
-  // (per-conversation), else the platform fallback Agent, else the default.
-  const agent = resolveAgentForTurn(ctx, 'whatsapp', [turn.conversationId], defaultAgent);
-  try {
-    const answer = await agent.chat({
-      userMessage: turn.text,
-      sessionScope: `whatsapp:${turn.conversationId}`,
-      userId: turn.userRef.id,
-    });
-    if (isNoReply(answer)) {
-      logNoReplyDrop(turn.channelId, { conversationId: turn.conversationId });
-      return;
-    }
-    const text = renderAnswer(answer);
-    if (text.trim().length === 0) return;
-    await conn.sendText(turn.conversationId, text);
-  } catch (err) {
-    core.log('error', 'failed to handle WhatsApp turn', {
-      error: (err as Error).message,
-      conversationId: turn.conversationId,
-    });
-    try {
-      await conn.sendText(
-        turn.conversationId,
-        '⚠️ Entschuldigung, dabei ist ein Fehler aufgetreten. Bitte versuche es erneut.',
-      );
-    } catch {
-      /* original error already logged — don't mask it with a send failure */
-    }
-  }
 }
 
 /**

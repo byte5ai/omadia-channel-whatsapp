@@ -1,13 +1,25 @@
 import { isJidGroup, jidNormalizedUser, type WAMessage, type WAMessageKey } from '@whiskeysockets/baileys';
 
-import type {
-  ChatStreamEvent,
+import {
+  makePrincipal,
+  parseSessionScope,
+  type ChatStreamEvent,
   DiagramAttachment,
   FollowUpOption,
   IncomingTurn,
   OutgoingFileAttachment,
   PendingUserChoice,
+  TurnOrigin,
 } from '@omadia/channel-sdk';
+
+/** `ChannelUserRef.kind` and `TurnOrigin.channelType` of WhatsApp turns. */
+const USER_KIND = 'whatsapp-phone' as const;
+const CHANNEL_TYPE = 'whatsapp';
+
+/** The session scope the plugin has always used for a WhatsApp conversation. */
+export function sessionScopeOf(conversationId: string): string {
+  return `${CHANNEL_TYPE}:${conversationId}`;
+}
 
 /**
  * Pull plain text out of a WhatsApp message. Returns `undefined` for message
@@ -58,7 +70,35 @@ export function phoneCandidates(msg: WAMessage): string[] {
   return [...new Set(phones)];
 }
 
-/** Translate a native WhatsApp message into the core `IncomingTurn` shape. */
+/**
+ * Where a turn came from, stated by the channel (spec 2042 INV-1, §5.8): the
+ * platform's own group-vs-direct statement, the conversation id exactly as the
+ * adapter addresses it, and the speaking person. The scope is the one the
+ * plugin already used as `sessionScope`, so no existing memory key changes.
+ */
+export function buildTurnOrigin(turn: IncomingTurn, messageId: string | undefined): TurnOrigin {
+  const principal = makePrincipal('user', `${CHANNEL_TYPE}:${turn.userRef.id}`);
+  return {
+    channelType: CHANNEL_TYPE,
+    scope: parseSessionScope(sessionScopeOf(turn.conversationId)),
+    ...(principal ? { principal } : {}),
+    ...(turn.conversationType ? { conversationType: turn.conversationType } : {}),
+    channelConversationId: turn.conversationId,
+    ...(messageId ? { messageId } : {}),
+    speaker: {
+      kind: turn.userRef.kind,
+      id: turn.userRef.id,
+      ...(turn.userRef.displayName ? { displayName: turn.userRef.displayName } : {}),
+    },
+  };
+}
+
+/**
+ * Translate a native WhatsApp message into the core `IncomingTurn` shape.
+ * The text is passed through verbatim, so `/agent` and `/agent <Name>` reach
+ * the kernel's management layer as ordinary messages (WhatsApp has no native
+ * bot commands).
+ */
 export function buildIncomingTurn(channelId: string, msg: WAMessage, text: string): IncomingTurn {
   const remoteJid = msg.key.remoteJid ?? '';
   const isGroup = isJidGroup(remoteJid) ?? remoteJid.endsWith('@g.us');
@@ -66,9 +106,12 @@ export function buildIncomingTurn(channelId: string, msg: WAMessage, text: strin
   const normalised = senderJid ? jidNormalizedUser(senderJid) : remoteJid;
   return {
     channelId,
+    channelType: CHANNEL_TYPE,
+    channelKey: remoteJid,
     conversationId: remoteJid,
+    conversationType: isGroup ? 'group' : 'direct',
     userRef: {
-      kind: 'whatsapp-phone',
+      kind: USER_KIND,
       id: normalised,
       ...(msg.pushName ? { displayName: msg.pushName } : {}),
     },
