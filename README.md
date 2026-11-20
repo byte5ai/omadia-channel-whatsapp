@@ -34,17 +34,28 @@ A channel plugin (`kind: channel`). The omadia kernel activates it from `manifes
 
 Instead you choose the agent in the chat:
 
-- `/agent` lists the agents available to you in this channel.
+- `/agents` lists the agents available to you in this channel.
 - `/agent Mira` selects Mira for you in this conversation. The omadia kernel stores the selection and confirms it once with a system message. Only agents the operator made available to you in WhatsApp can be selected.
-- The plugin does not parse the command. WhatsApp has no native bot commands, so the text is passed to the kernel as an ordinary message.
+- `/agent` on its own clears your selection; the binding or the default agent applies again.
+- The plugin does not parse the commands. WhatsApp has no native bot commands, so the text is passed on as an ordinary message to the agent the platform resolved for the conversation, and that agent carries the command out.
+
+If no agent answers you here (the agent is switched off, was deleted, or is not available to you), you get a short system message saying so. There is no fallback agent that answers instead.
+
+You are one person in every chat: your selection and the operator's availability rules are keyed by one identity, `user:whatsapp-phone:<number>@s.whatsapp.net`. WhatsApp increasingly shows a person only by a privacy ID (`@lid`); when it also reveals the phone number, the number is used, so a direct chat and any group share one identity. If WhatsApp shows only the privacy ID, that ID is the identity (and your selection does not carry over to a chat where your number is visible).
 
 Who is speaking: with one agent in a conversation there is no name line. Where several agents speak in one conversation, or on the first answer after the speaker changed, the answer starts with a plain name line (`Mira: ...`). A colleague's contribution to an answer appears as plain attribution (`Jonas: ...`), and messages from the system itself (for example "this agent is not available to you") are plain text without an agent name.
+
+## Polls and questions
+
+An agent can ask you a poll or a question (for example in a facilitated discussion). WhatsApp gets it as plain, numbered text, never as a button. You answer by typing: the number of an option (`2`), several numbers (`1,3`), a ranking (`2,1,3`), `ja` / `nein`, a number or a date (`2026-12-01`). In a group, reply to the question message (or @mention the bot). A free-text question takes only a message that replies to it. The typed answer reaches the agent as the same structured answer a card click would be. A message that does not answer the question is an ordinary message.
+
+The plugin registers a targeted and a conversation send provider with the kernel for this: messages go out as `system` text, cards are limited to one question of a kind a typed reply can answer (no assignment questions), and the plugin never sends as another agent's own identity (one number).
 
 ## Groups
 
 Groups are ignored by default (**Ignore groups** on). With it off:
 
-- The bot answers only when it is @mentioned, when someone replies to one of its messages, or when a message starts with `/agent`. It never answers every message.
+- The bot answers only when it is @mentioned, when someone replies to one of its messages, or when a message starts with `/agent` or `/agents`. It never answers every message.
 - It answers only while WhatsApp lets it read the group's member list. Otherwise it says so once (at most every 10 minutes per group) and stays silent. The plugin reports the member list to the kernel (`complete`, `partial` or `unknown`), which uses it to decide what an answer in front of this audience may contain.
 - WhatsApp may address members by a privacy ID (`@lid`) instead of a phone number. The roster then carries that ID, with the phone number as `externalId` when WhatsApp provides it.
 

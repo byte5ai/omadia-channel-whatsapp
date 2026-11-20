@@ -34,17 +34,28 @@ Ein Channel-Plugin (`kind: channel`). Der omadia-Kernel aktiviert es aus der `ma
 
 Stattdessen wählst du den Agenten im Chat:
 
-- `/agent` listet die Agenten, die dir in diesem Channel zur Verfügung stehen.
+- `/agents` listet die Agenten, die dir in diesem Channel zur Verfügung stehen.
 - `/agent Mira` wählt Mira für dich in dieser Unterhaltung. Der omadia-Kernel speichert die Auswahl und bestätigt sie einmal mit einer Systemnachricht. Auswählbar sind nur Agenten, die der Betreiber dir in WhatsApp freigegeben hat.
-- Das Plugin parst den Befehl nicht. WhatsApp kennt keine nativen Bot-Befehle, der Text geht als normale Nachricht an den Kernel.
+- `/agent` allein hebt deine Auswahl auf; es gilt wieder die Bindung oder der Standard-Agent.
+- Das Plugin parst die Befehle nicht. WhatsApp kennt keine nativen Bot-Befehle, der Text geht als normale Nachricht an den Agenten, den die Plattform für die Unterhaltung bestimmt hat, und dieser führt den Befehl aus.
+
+Antwortet dir hier kein Agent (er ist abgeschaltet, gelöscht oder steht dir nicht zur Verfügung), bekommst du eine kurze Systemnachricht, die das sagt. Einen Ersatz-Agenten, der stattdessen antwortet, gibt es nicht.
+
+Du bist in jedem Chat dieselbe Person: Auswahl und Verfügbarkeitsregeln des Betreibers hängen an einer Identität, `user:whatsapp-phone:<Nummer>@s.whatsapp.net`. WhatsApp zeigt eine Person zunehmend nur noch über eine Datenschutz-ID (`@lid`); verrät es auch die Telefonnummer, gilt die Nummer, sodass ein Direktchat und jede Gruppe dieselbe Identität teilen. Zeigt WhatsApp nur die Datenschutz-ID, ist diese ID die Identität (und deine Auswahl gilt nicht in einem Chat, in dem deine Nummer sichtbar ist).
 
 Wer spricht: Bei einem Agenten in einer Unterhaltung gibt es keine Namenszeile. Sprechen mehrere Agenten in einer Unterhaltung, oder ist es die erste Antwort nach einem Wechsel, beginnt die Antwort mit einer schlichten Namenszeile (`Mira: ...`). Der Beitrag einer Kollegin zu einer Antwort steht als einfache Zuordnung im Text (`Jonas: ...`), und Nachrichten des Systems selbst (zum Beispiel „dieser Agent steht dir nicht zur Verfügung“) sind Klartext ohne Agentennamen.
+
+## Umfragen und Fragen
+
+Ein Agent kann dir eine Umfrage oder Frage stellen (zum Beispiel in einer moderierten Diskussion). WhatsApp bekommt sie als schlichten, nummerierten Text, nie als Button. Du antwortest durch Tippen: die Nummer einer Option (`2`), mehrere Nummern (`1,3`), eine Rangfolge (`2,1,3`), `ja` / `nein`, eine Zahl oder ein Datum (`2026-12-01`). In einer Gruppe antwortest du auf die Fragenachricht (oder @erwähnst den Bot). Eine Freitext-Frage nimmt nur eine Nachricht an, die auf sie antwortet. Die getippte Antwort erreicht den Agenten als dieselbe strukturierte Antwort wie ein Klick auf eine Karte. Eine Nachricht, die die Frage nicht beantwortet, ist eine normale Nachricht.
+
+Dafür registriert das Plugin einen Targeted- und einen Conversation-Send-Provider beim Kernel: Nachrichten gehen als `system`-Text raus, Karten sind auf eine Frage einer Art beschränkt, die eine getippte Antwort beantworten kann (keine Zuweisungsfragen), und das Plugin sendet nie als eigene Identität eines anderen Agenten (eine Nummer).
 
 ## Gruppen
 
 Gruppen werden standardmäßig ignoriert (**Ignore groups** an). Ist das aus:
 
-- Der Bot antwortet nur, wenn er @erwähnt wird, jemand auf eine seiner Nachrichten antwortet oder eine Nachricht mit `/agent` beginnt. Er antwortet nie auf jede Nachricht.
+- Der Bot antwortet nur, wenn er @erwähnt wird, jemand auf eine seiner Nachrichten antwortet oder eine Nachricht mit `/agent` oder `/agents` beginnt. Er antwortet nie auf jede Nachricht.
 - Er antwortet nur, solange WhatsApp ihm die Mitgliederliste der Gruppe liefert. Sonst sagt er das einmal (höchstens alle 10 Minuten je Gruppe) und bleibt still. Das Plugin meldet dem Kernel die Mitgliederliste (`complete`, `partial` oder `unknown`); der Kernel entscheidet damit, was eine Antwort vor diesem Publikum enthalten darf.
 - WhatsApp kann Mitglieder über eine Datenschutz-ID (`@lid`) statt der Telefonnummer ansprechen. Die Liste trägt dann diese ID, mit der Telefonnummer als `externalId`, wenn WhatsApp sie liefert.
 
