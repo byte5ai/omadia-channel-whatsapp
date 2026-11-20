@@ -39,6 +39,8 @@ Stattdessen wählst du den Agenten im Chat:
 - `/agent` allein hebt deine Auswahl auf; es gilt wieder die Bindung oder der Standard-Agent.
 - Das Plugin parst die Befehle nicht. WhatsApp kennt keine nativen Bot-Befehle, der Text geht als normale Nachricht an den Agenten, den die Plattform für die Unterhaltung bestimmt hat, und dieser führt den Befehl aus.
 
+**Wo die Auswahl liegt:** `/agent` wird je Chat und Person gespeichert: der Schlüssel ist die Chat-JID (die Gruppe oder der Direktchat) zusammen mit deiner Identität. In einer Gruppe hat jede Person ihre eigene Auswahl; dieselbe Person hat in getrennten Chats getrennte Auswahlen. WhatsApp kann denselben Direktchat zeitweise über die Telefonnummer und zeitweise über die Datenschutz-ID ansprechen; das zählt als zwei Chats. WhatsApp nennt keine Sprache der Person, Systemnachrichten sind deshalb deutsch, solange keine Sprache bekannt ist.
+
 Antwortet dir hier kein Agent (er ist abgeschaltet, gelöscht oder steht dir nicht zur Verfügung), bekommst du eine kurze Systemnachricht, die das sagt. Einen Ersatz-Agenten, der stattdessen antwortet, gibt es nicht.
 
 Du bist in jedem Chat dieselbe Person: Auswahl und Verfügbarkeitsregeln des Betreibers hängen an einer Identität, `user:whatsapp-phone:<Nummer>@s.whatsapp.net`. WhatsApp zeigt eine Person zunehmend nur noch über eine Datenschutz-ID (`@lid`); verrät es auch die Telefonnummer, gilt die Nummer, sodass ein Direktchat und jede Gruppe dieselbe Identität teilen. Zeigt WhatsApp nur die Datenschutz-ID, ist diese ID die Identität (und deine Auswahl gilt nicht in einem Chat, in dem deine Nummer sichtbar ist).

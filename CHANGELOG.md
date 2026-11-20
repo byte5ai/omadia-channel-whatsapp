@@ -37,6 +37,14 @@ publish before that kernel is live.
   a resolver error is a loud `system` failure text, not a silent default agent.
   Without a published resolver (minimal deployment) the single orchestrator
   answers, as before.
+- **No `chatAgent@1` fallback.** The agent always comes from the resolver's
+  result (`resolveChannelRoute`), also on `reject`. The singleton is read per
+  turn only on a host that publishes no resolver; the activation-time lookup
+  (and its "orchestrator unavailable" error) is gone.
+- **Selection key and locale.** The key passed to `resolve` is the chat JID (the
+  group, or the direct chat), the tightest key, plus the principal. A locale is
+  passed only if the turn states one (`metadata.locale`, normalised to
+  `de`/`en`); WhatsApp states none, so notices default to German.
 - **One principal form.** The sender is `user:whatsapp-phone:<jid>`, built with
   the SDK's `channelUserPrincipal` / `turnPrincipal` (replaces the hand-made
   `user:whatsapp:<jid>`). LID decision: the id is the phone-number JID whenever

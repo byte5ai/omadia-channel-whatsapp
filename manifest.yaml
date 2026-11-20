@@ -182,9 +182,11 @@ permissions:
 #
 # `optional_requires:` — `channelResolver@1` is the multi-orchestrator
 # per-turn router, published by the middleware kernel rather than a plugin
-# manifest, and its absence is survivable (a minimal single-orchestrator
-# deployment: the chatAgent answers every turn; with a resolver there is no
-# fallback agent, a reject is answered with the resolver's notice). Agent
+# manifest, and its absence is survivable (a host without a multi-agent
+# registry: the `chatAgent@1` singleton answers every turn; with a resolver
+# `chatAgent@1` is never read, there is no fallback agent, and a reject is
+# answered with the resolver's notice; `chatAgent@^1` under `requires:` serves
+# only that resolver-less host). Agent
 # selection (`/agent`, `/agents`) is carried out by the resolver's ChatAgent,
 # so there is no `agentSelection` entry. A `requires:` entry would be permanently unresolved and
 # drop the channel from the eligible set; `optional_requires:` grants the same

@@ -39,6 +39,8 @@ Instead you choose the agent in the chat:
 - `/agent` on its own clears your selection; the binding or the default agent applies again.
 - The plugin does not parse the commands. WhatsApp has no native bot commands, so the text is passed on as an ordinary message to the agent the platform resolved for the conversation, and that agent carries the command out.
 
+**Where the selection lives:** `/agent` is stored per chat and person: the key is the chat JID (the group, or the direct chat) together with your identity. In a group everyone has their own selection; the same person has separate selections in separate chats. WhatsApp can address one direct chat by phone number at one time and by privacy ID at another; those count as two chats. WhatsApp states no language for a person, so system messages are in German unless a language is known.
+
 If no agent answers you here (the agent is switched off, was deleted, or is not available to you), you get a short system message saying so. There is no fallback agent that answers instead.
 
 You are one person in every chat: your selection and the operator's availability rules are keyed by one identity, `user:whatsapp-phone:<number>@s.whatsapp.net`. WhatsApp increasingly shows a person only by a privacy ID (`@lid`); when it also reveals the phone number, the number is used, so a direct chat and any group share one identity. If WhatsApp shows only the privacy ID, that ID is the identity (and your selection does not carry over to a chat where your number is visible).
