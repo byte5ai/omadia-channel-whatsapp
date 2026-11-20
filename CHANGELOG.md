@@ -76,7 +76,7 @@ publish before that kernel is live.
   turn (no pace acknowledgement, no agent reply). The wait is bounded (1.5 s);
   a timeout or error is logged and the turn starts. Without the method (older
   kernel) it is `emit` and the turn, as before.
-- **`compat.core` is `>=1.76.0 <2.0`** (placeholder; the final range is set with
+- **`compat.core` is `>=1.75.0 <2.0`** (placeholder; the final range is set with
   the release).
 - **Groups (`ignore_groups` off).** The bot answers only when @mentioned,
   replied to, or given `/agent`; its own mention token is stripped from the
