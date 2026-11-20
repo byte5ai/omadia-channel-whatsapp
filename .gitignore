@@ -10,3 +10,4 @@ out/
 # never the runtime — the runtime persists auth via ctx.memory). Belt-and-braces.
 .wa-auth/
 auth_info*/
+.test-build/

@@ -1,13 +1,27 @@
 import { isJidGroup, jidNormalizedUser, type WAMessage, type WAMessageKey } from '@whiskeysockets/baileys';
 
-import type {
-  ChatStreamEvent,
+import {
+  channelUserPrincipal,
+  parsePrincipal,
+  parseSessionScope,
+  turnPrincipal,
+  type ChatStreamEvent,
   DiagramAttachment,
   FollowUpOption,
   IncomingTurn,
   OutgoingFileAttachment,
   PendingUserChoice,
+  TurnOrigin,
 } from '@omadia/channel-sdk';
+
+/** `ChannelUserRef.kind` and `TurnOrigin.channelType` of WhatsApp turns. */
+const USER_KIND = 'whatsapp-phone' as const;
+const CHANNEL_TYPE = 'whatsapp';
+
+/** The session scope the plugin has always used for a WhatsApp conversation. */
+export function sessionScopeOf(conversationId: string): string {
+  return `${CHANNEL_TYPE}:${conversationId}`;
+}
 
 /**
  * Pull plain text out of a WhatsApp message. Returns `undefined` for message
@@ -58,22 +72,121 @@ export function phoneCandidates(msg: WAMessage): string[] {
   return [...new Set(phones)];
 }
 
-/** Translate a native WhatsApp message into the core `IncomingTurn` shape. */
+const PHONE_JID_SERVER = '@s.whatsapp.net';
+
+/**
+ * The sender's phone-number JID, when WhatsApp reveals it.
+ *
+ * WhatsApp addresses a person either by phone number (`…@s.whatsapp.net`) or
+ * by a privacy LID (`…@lid`), and LID-only groups are the common case now. The
+ * LID digits are not a phone number, and the same person can show up as a LID
+ * in one chat and as a number in another. Baileys carries the number in
+ * `senderPn` (direct) / `participantPn` (group) next to the LID.
+ */
+function senderPhoneJid(msg: WAMessage, isGroup: boolean): string | undefined {
+  const key = msg.key as WAMessageKey;
+  const candidates = isGroup ? [key.participant, key.participantPn] : [key.remoteJid, key.senderPn];
+  const phone = candidates.find((j): j is string => typeof j === 'string' && j.endsWith(PHONE_JID_SERVER));
+  return phone ? jidNormalizedUser(phone) : undefined;
+}
+
+/** The WhatsApp id of the message a turn came from. */
+export function messageIdOf(turn: IncomingTurn): string | undefined {
+  const key = (turn.rawEvent as { key?: { id?: string | null } } | undefined)?.key;
+  return key?.id ?? undefined;
+}
+
+/** The id of the message a message replies to, when it is a reply. */
+function quotedMessageIdOf(msg: WAMessage): string | undefined {
+  const message = msg.message as Record<string, unknown> | null | undefined;
+  for (const value of Object.values(message ?? {})) {
+    if (value && typeof value === 'object' && 'contextInfo' in value) {
+      const info = (value as { contextInfo?: { stanzaId?: string | null } | null }).contextInfo;
+      if (info?.stanzaId) return info.stanzaId;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * The person as the ONE principal form of every channel (spec 2042 §5.3):
+ * `user:whatsapp-phone:<jid>`, built by the SDK, never by hand.
+ *
+ * LID decision: the principal id is the phone-number JID whenever WhatsApp
+ * reveals it (`metadata.senderPhoneJid`), so one person is one principal in a
+ * direct chat and in any group, and an operator can name them by number. Only
+ * when WhatsApp shows nothing but the LID, the LID JID is the id. Such a
+ * person has a separate principal (their `/agent` selection does not carry to
+ * the chat where their number is visible): the LID-to-number mapping is not
+ * available to a plugin at turn time, and guessing one would merge people.
+ * `userRef.id` (memory keys, roster, audience check) stays the JID WhatsApp
+ * addresses the sender by in that chat.
+ */
+export function principalRefOf(turn: IncomingTurn): { kind: string; id: string } {
+  const phone = turn.metadata?.['senderPhoneJid'];
+  return { kind: turn.userRef.kind, id: typeof phone === 'string' && phone.length > 0 ? phone : turn.userRef.id };
+}
+
+/** The principal a turn is routed by: `turnPrincipal` of the sender and the origin's principal. */
+export function routePrincipalOf(turn: IncomingTurn, origin: TurnOrigin): string {
+  return turnPrincipal(principalRefOf(turn), origin.principal);
+}
+
+/**
+ * Where a turn came from, stated by the channel (spec 2042 INV-1, §5.8): the
+ * platform's own group-vs-direct statement, the conversation id exactly as the
+ * adapter addresses it, and the speaking person. The scope is the one the
+ * plugin already used as `sessionScope`, so no existing memory key changes.
+ */
+export function buildTurnOrigin(turn: IncomingTurn, messageId: string | undefined): TurnOrigin {
+  const principal = parsePrincipal(channelUserPrincipal(principalRefOf(turn)));
+  return {
+    channelType: CHANNEL_TYPE,
+    scope: parseSessionScope(sessionScopeOf(turn.conversationId)),
+    ...(principal ? { principal } : {}),
+    ...(turn.conversationType ? { conversationType: turn.conversationType } : {}),
+    channelConversationId: turn.conversationId,
+    ...(messageId ? { messageId } : {}),
+    speaker: {
+      kind: turn.userRef.kind,
+      id: turn.userRef.id,
+      ...(turn.userRef.displayName ? { displayName: turn.userRef.displayName } : {}),
+    },
+  };
+}
+
+/**
+ * Translate a native WhatsApp message into the core `IncomingTurn` shape.
+ * The text is passed through verbatim, so `/agent`, `/agent <Name>` and
+ * `/agents` reach the agent the channel resolver returns as ordinary messages
+ * (WhatsApp has no native bot commands); that agent carries them out.
+ */
 export function buildIncomingTurn(channelId: string, msg: WAMessage, text: string): IncomingTurn {
   const remoteJid = msg.key.remoteJid ?? '';
   const isGroup = isJidGroup(remoteJid) ?? remoteJid.endsWith('@g.us');
   const senderJid = isGroup ? (msg.key.participant ?? remoteJid) : remoteJid;
   const normalised = senderJid ? jidNormalizedUser(senderJid) : remoteJid;
+  const phoneJid = senderPhoneJid(msg, isGroup);
+  const quotedMessageId = quotedMessageIdOf(msg);
   return {
     channelId,
+    channelType: CHANNEL_TYPE,
+    channelKey: remoteJid,
     conversationId: remoteJid,
+    conversationType: isGroup ? 'group' : 'direct',
     userRef: {
-      kind: 'whatsapp-phone',
+      kind: USER_KIND,
       id: normalised,
       ...(msg.pushName ? { displayName: msg.pushName } : {}),
     },
     text,
-    metadata: { isGroup, remoteJid, senderJid: normalised },
+    metadata: {
+      isGroup,
+      remoteJid,
+      senderJid: normalised,
+      ...(phoneJid ? { senderPhoneJid: phoneJid } : {}),
+      ...(quotedMessageId ? { quotedMessageId } : {}),
+    },
     rawEvent: msg,
   };
 }

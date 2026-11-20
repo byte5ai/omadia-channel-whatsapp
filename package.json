@@ -1,6 +1,6 @@
 {
   "name": "@omadia/channel-whatsapp",
-  "version": "0.1.9",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "main": "dist/plugin.js",
@@ -14,7 +14,8 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "node scripts/build-zip.mjs",
-    "clean": "rm -rf dist out"
+    "clean": "rm -rf dist out",
+    "test": "node scripts/test.mjs"
   },
   "dependencies": {
     "@hapi/boom": "^10.0.0",

@@ -5,6 +5,7 @@ import makeWASocket, {
   jidNormalizedUser,
   makeCacheableSignalKeyStore,
   type ConnectionState,
+  type GroupMetadata,
   type MessageUpsertType,
   type WAMessage,
   type WASocket,
@@ -16,12 +17,16 @@ import type { IncomingTurn } from '@omadia/channel-sdk';
 import type { MemoryAccessor } from '@omadia/plugin-api';
 
 import { useMemoryAuthState } from './authState.js';
+import type { MessageAddressing } from './conversationMessages.js';
+import { groupAddressing, stripOwnMention, type OwnIdentity } from './groupAddressing.js';
 import { buildIncomingTurn, extractText, phoneCandidates } from './inbound.js';
 import { makeBaileysLogger, type BaileysLogger, type LogSink } from './logger.js';
 import { patchState, type ChannelState } from './state.js';
+import type { TurnRefusal } from './turnHandler.js';
 
 export interface AccessPolicy {
-  /** Stay silent in group chats. */
+  /** Stay silent in group chats. When off, a group is answered only when the
+   *  bot is addressed (mention, reply, `/agent`) AND its members are readable. */
   ignoreGroups: boolean;
   /** Digits-only phone numbers allowed to chat (empty = allow all direct chats). */
   allowlist: Set<string>;
@@ -34,14 +39,24 @@ export interface WhatsAppConnectionDeps {
   deviceName: string;
   state: ChannelState;
   policy: AccessPolicy;
-  onMessage: (turn: IncomingTurn) => Promise<void>;
+  /** A turn addressed to the bot, and how it was (a direct chat, mention, reply, command). */
+  onMessage: (turn: IncomingTurn, addressing: MessageAddressing) => Promise<void>;
+  /** A group message that does not address the bot: not a turn; reported to the kernel when it asks for every message. */
+  onObserved?: (turn: IncomingTurn) => void;
+  /** A turn the connection will not hand to an agent (told to the user as a notice). */
+  onRefused: (turn: IncomingTurn, reason: TurnRefusal) => Promise<void>;
+  /**
+   * Whether the channel can name the members of a group right now. A group is
+   * answered only when it can (spec 2042 §5.8, audience floor): the kernel
+   * decides per roster status what may happen, but a group whose members
+   * cannot be read at all is not answered.
+   */
+  canAnswerGroup: (groupJid: string) => Promise<boolean>;
+  /** The membership of a group changed; drop any cached roster. */
+  onGroupMembershipChanged?: (groupJid: string) => void;
 }
 
 const RECONNECT_DELAY_MS = 3_000;
-
-/** Reaction posted on every accepted message — OpenClaw-style — so the user
- *  sees their message was picked up before the (slower) answer arrives. */
-const ACK_EMOJI = '👀';
 
 /**
  * Owns the long-lived WhatsApp Web (Baileys) socket: connect → emit QR →
@@ -112,6 +127,7 @@ export class WhatsAppConnection {
       sock.ev.on('creds.update', () => void this.saveCreds());
       sock.ev.on('connection.update', (u) => void this.onConnectionUpdate(u));
       sock.ev.on('messages.upsert', (u) => void this.onMessagesUpsert(u));
+      sock.ev.on('group-participants.update', (u) => this.deps.onGroupMembershipChanged?.(u.id));
     } catch (err) {
       this.deps.log('error', 'failed to open WhatsApp socket', { error: (err as Error).message });
       patchState(this.deps.state, { status: 'error', lastError: (err as Error).message });
@@ -214,13 +230,27 @@ export class WhatsAppConnection {
           continue;
         }
 
-        const text = extractText(msg);
-        if (!text) {
+        const rawText = extractText(msg);
+        if (!rawText) {
           this.deps.log('info', 'WhatsApp inbound skipped: no text content', {
             jid: remoteJid,
             kinds: Object.keys(msg.message ?? {}).join(',') || 'none',
           });
           continue;
+        }
+
+        // Team etiquette (spec 2042 §5.8): in a group the bot answers only when
+        // it is addressed — @mention, reply to one of its messages, or the
+        // `/agent` command — never on every message. The own @mention token is
+        // removed so "@Omadia /agent Mira" reaches the kernel as `/agent Mira`.
+        // An unaddressed group message is no turn, but the kernel may want it
+        // (a facilitation reads every message), so it is reported after the
+        // allowlist below.
+        let text = rawText;
+        let addressing: MessageAddressing | undefined = 'direct';
+        if (isGroup) {
+          addressing = groupAddressing(msg, rawText, this.ownIdentity());
+          if (addressing) text = stripOwnMention(rawText, this.ownIdentity()) || rawText;
         }
 
         // Allowlist by real phone number. WhatsApp may address the chat by a
@@ -246,10 +276,22 @@ export class WhatsAppConnection {
 
         this.deps.log('info', 'WhatsApp message received', { jid: remoteJid, fromMe, isGroup });
 
-        // ACK first (OpenClaw-style) so the user immediately sees it was picked up.
-        void this.sendReaction(remoteJid, msg.key, ACK_EMOJI);
-        void this.sendTyping(remoteJid);
-        await this.deps.onMessage(buildIncomingTurn(this.deps.channelId, msg, text));
+        const turn = buildIncomingTurn(this.deps.channelId, msg, text);
+        if (!addressing) {
+          this.deps.log('info', 'WhatsApp inbound not a turn: group message not addressed to the bot', {
+            jid: remoteJid,
+          });
+          this.deps.onObserved?.(turn);
+          continue;
+        }
+        if (isGroup && !(await this.deps.canAnswerGroup(remoteJid))) {
+          await this.deps.onRefused(turn, 'group_roster_unavailable');
+          continue;
+        }
+
+        // No receipt reaction (not a declared decoration). The turn handler
+        // shows the typing indicator and paces long work (spec 2042 §5.8).
+        await this.deps.onMessage(turn, addressing);
       } catch (err) {
         this.deps.log('error', 'error handling inbound WhatsApp message', {
           jid: remoteJid,
@@ -259,20 +301,32 @@ export class WhatsAppConnection {
     }
   }
 
-  async sendText(jid: string, text: string): Promise<void> {
-    if (!this.sock) throw new Error('WhatsApp socket not connected');
-    const sent = await this.sock.sendMessage(jid, { text });
-    if (sent?.key?.id) this.recordSent(sent.key.id);
+  /** True while the linked-device socket is open and paired. */
+  isConnected(): boolean {
+    return this.sock !== undefined && this.deps.state.status === 'connected';
   }
 
-  /** Post an emoji reaction on a message (ACK). Best-effort — never throws. */
-  async sendReaction(jid: string, key: WAMessage['key'], emoji: string): Promise<void> {
-    try {
-      const sent = await this.sock?.sendMessage(jid, { react: { text: emoji, key } });
-      if (sent?.key?.id) this.recordSent(sent.key.id);
-    } catch (err) {
-      this.deps.log('warn', 'failed to send WhatsApp reaction', { error: (err as Error).message });
-    }
+  /** The linked account's phone-number JID and privacy LID (empty until connected). */
+  ownIdentity(): OwnIdentity {
+    return { jid: this.ownJid, lid: this.ownLid };
+  }
+
+  /** Members and metadata of a group, as WhatsApp reports them. */
+  async groupMetadata(groupJid: string): Promise<GroupMetadata> {
+    if (!this.sock) throw new Error('WhatsApp socket not connected');
+    return this.sock.groupMetadata(groupJid);
+  }
+
+  /**
+   * The raw send primitive. Only `emit.ts` calls it (`emitter.test.ts`
+   * enforces that), so every message carries a speaker.
+   */
+  async sendText(jid: string, text: string): Promise<string | undefined> {
+    if (!this.sock) throw new Error('WhatsApp socket not connected');
+    const sent = await this.sock.sendMessage(jid, { text });
+    const id = sent?.key?.id ?? undefined;
+    if (id) this.recordSent(id);
+    return id;
   }
 
   /** Remember an id we emitted so its `messages.upsert` echo is ignored. Bounded. */

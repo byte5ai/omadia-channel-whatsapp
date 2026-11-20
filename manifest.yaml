@@ -15,7 +15,7 @@ identity:
   kind: "channel"
   domain: "whatsapp"
   name: "WhatsApp"
-  version: "0.1.9"                         # === package.json "version"
+  version: "0.2.0"                         # === package.json "version"
   description: "WhatsApp-Channel via WhatsApp Web (Baileys, QR-Linked-Device). Routet WhatsApp-Chats in den Omadia-Orchestrator."
   authors:
     - name: "byte5 GmbH"
@@ -28,7 +28,7 @@ identity:
     - "communication"
 
 compat:
-  core: ">=1.0 <2.0"
+  core: ">=1.75.0 <2.0"                    # placeholder for the planned release; the parent session sets the final range
   node: ">=20"
 
 depends_on: []
@@ -73,6 +73,20 @@ setup:
       ### 3. Limit the reach (optional)
       *Ignore groups* keeps the bot silent in groups; the *allowlist* restricts
       it to specific phone numbers (E.164, e.g. `491701234567`).
+
+      ### 4. Choose an agent
+      This installation is **one** WhatsApp number, so all agents share it. In a
+      chat, `/agents` lists the agents available to you here, `/agent <Name>`
+      selects one and `/agent` alone clears your selection; the answer is
+      confirmed once as a system message. Where several agents speak in one
+      chat, a name line (`Mira: …`) shows who is answering. Polls and questions
+      arrive as numbered text; you answer by typing the number (in a group, reply
+      to the question).
+
+      ### 5. Groups (optional)
+      With *Ignore groups* off, the bot answers in a group only when it is
+      @mentioned, replied to, or given `/agent` or `/agents`, and only while WhatsApp lets it
+      read the member list.
     de: |
       ## WhatsApp verknüpfen
 
@@ -99,6 +113,19 @@ setup:
       ### 3. Reichweite eingrenzen (optional)
       Mit *Gruppen ignorieren* bleibt der Bot in Gruppen still; mit der *Allowlist*
       beschränkst du ihn auf bestimmte Telefonnummern (E.164, z.B. `491701234567`).
+
+      ### 4. Agent wählen
+      Diese Installation ist **eine** WhatsApp-Nummer, alle Agenten teilen sie sich.
+      Im Chat listet `/agents` die für dich hier verfügbaren Agenten, `/agent <Name>`
+      wählt einen aus und `/agent` allein hebt deine Auswahl auf; die Antwort
+      bestätigt das einmal als Systemnachricht. Sprechen mehrere Agenten in einem
+      Chat, zeigt eine Namenszeile (`Mira: …`), wer antwortet. Umfragen und Fragen
+      kommen als nummerierter Text; du antwortest, indem du die Nummer tippst.
+
+      ### 5. Gruppen (optional)
+      Mit ausgeschaltetem *Gruppen ignorieren* antwortet der Bot in einer Gruppe nur,
+      wenn er @erwähnt wird, auf eine seiner Nachrichten geantwortet wird oder
+      `/agent` bzw. `/agents` kommt, und nur solange WhatsApp ihm die Mitgliederliste liefert.
   fields:
     - key: "device_name"
       type: "string"
@@ -110,7 +137,7 @@ setup:
     - key: "ignore_groups"
       type: "boolean"
       label: "Gruppen ignorieren"
-      help: "Wenn aktiv, reagiert der Bot nur auf Direkt-Chats (1:1) und bleibt in Gruppen still."
+      help: "Wenn aktiv, reagiert der Bot nur auf Direkt-Chats (1:1) und bleibt in Gruppen still. Wenn aus, antwortet er in Gruppen nur auf Erwähnung, Antwort auf seine Nachricht oder /agent bzw. /agents - und nur, wenn WhatsApp die Mitglieder liefert."
       required: false
       default: true
 
@@ -156,8 +183,13 @@ permissions:
 #
 # `optional_requires:` — `channelResolver@1` is the multi-orchestrator
 # per-turn router, published by the middleware kernel rather than a plugin
-# manifest, and its absence is survivable (every turn falls back to the
-# default chatAgent). A `requires:` entry would be permanently unresolved and
+# manifest, and its absence is survivable (a host without a multi-agent
+# registry: the `chatAgent@1` singleton answers every turn; with a resolver
+# `chatAgent@1` is never read, there is no fallback agent, and a reject is
+# answered with the resolver's notice; `chatAgent@^1` under `requires:` serves
+# only that resolver-less host). Agent
+# selection (`/agent`, `/agents`) is carried out by the resolver's ChatAgent,
+# so there is no `agentSelection` entry. A `requires:` entry would be permanently unresolved and
 # drop the channel from the eligible set; `optional_requires:` grants the same
 # declaration the service gate asks for without a resolver edge.
 requires:

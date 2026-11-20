@@ -1,10 +1,10 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import * as channelSdk from '@omadia/channel-sdk';
 import {
-  isNoReply,
-  logNoReplyDrop,
+  getChatAgent,
+  resolveChannelRoute,
+  rosterStatusOf,
   type ChatAgent,
   type ChannelHandle,
   type CoreApi,
@@ -13,8 +13,14 @@ import {
 import type { PluginContext } from '@omadia/plugin-api';
 
 import { createAdminRouter } from './adminRouter.js';
-import { renderAnswer } from './renderer.js';
+import { createMessageEvents, handleAddressed, whatsAppInstallationKey, type DeliveryMode } from './conversationMessages.js';
+import { WHATSAPP_CHANNEL_TYPE, createAnswerEmitter } from './emit.js';
+import { createWhatsAppRosterProvider } from './roster.js';
+import { createWhatsAppSendProviders } from './sendProviders.js';
+import { PersistentSpeakerHistoryStore } from './speakerHistory.js';
+import { createTurnRouter } from './routing.js';
 import { createChannelState } from './state.js';
+import { createTurnHandler } from './turnHandler.js';
 import { WhatsAppConnection } from './whatsappConnection.js';
 
 /**
@@ -35,22 +41,77 @@ export async function activate(ctx: PluginContext, core: CoreApi): Promise<Chann
   const ignoreGroups = ctx.config.get<boolean>('ignore_groups') ?? true;
   const allowlist = parseAllowlist(ctx.config.get<string>('allowlist') ?? '');
 
-  // Resolve the orchestrator's ChatAgent. Prefers the SDK's getChatAgent()
-  // helper; falls back to the raw 'chatAgent' service lookup so the plugin
-  // still runs on a host whose channel-sdk predates the helper.
-  const agent = resolveChatAgent(ctx);
-  if (!agent) {
-    throw new Error(
-      '@omadia/channel-whatsapp: orchestrator unavailable (getChatAgent) — the orchestrator plugin must be installed and active',
-    );
-  }
-
   const state = createChannelState();
 
-  // `let conn!` so the onMessage closure can reference the instance it is
-  // attached to; the closure only fires once messages arrive (long after
+  // `let conn!` so the closures below can reference the instance they are
+  // attached to; they only fire once messages arrive (long after
   // construction), by which time `conn` is assigned.
   let conn!: WhatsAppConnection;
+
+  // One identity per installation (one linked number), so the plain name line
+  // (INV-4) is what tells several agents apart. The history survives restarts.
+  const speakerHistory = new PersistentSpeakerHistoryStore(
+    ctx.memory.pluginWide ?? ctx.memory,
+    (message, error) => core.log('warn', message, { error: (error as Error).message }),
+  );
+  await speakerHistory.load();
+
+  const emitter = createAnswerEmitter({
+    sendText: (jid, text) => conn.sendText(jid, text),
+    speakerHistory,
+    onDecorationRefused: (refusal) =>
+      core.log('error', 'WhatsApp decoration refused by the registry', { ...refusal }),
+  });
+  const turns = createTurnHandler({
+    // The platform's channelResolver decides per turn and per sender (bound
+    // agent + speaker, or reject + notice); there is no fallback agent. The
+    // chatAgent@1 singleton is read only when no resolver is published.
+    route: createTurnRouter({
+      resolve: (channelKey, context) => resolveChannelRoute(ctx, WHATSAPP_CHANNEL_TYPE, channelKey, context),
+      singleAgent: () => resolveSingleAgent(ctx),
+    }),
+    emitter,
+    sendTyping: (jid) => conn.sendTyping(jid),
+    log: (level, message, context) => core.log(level, message, context),
+  });
+
+  // Polls and question cards: the kernel posts them as numbered text through
+  // `sendToConversation` and turns a typed reply into the `card_answer` from the
+  // `created` events below (replyToMessageId / addressedToBot). No card code here.
+  const delivery = deliveryModeOf(core);
+  const messageEvents = createMessageEvents({
+    channelId,
+    emit: typeof core.emitConversationMessage === 'function' ? (event) => core.emitConversationMessage?.(event) : undefined,
+    report:
+      typeof core.reportConversationMessage === 'function'
+        ? (event) => core.reportConversationMessage?.(event) ?? Promise.resolve({ answeredCard: false })
+        : undefined,
+    delivery,
+    installationKey: () => whatsAppInstallationKey(conn.ownIdentity()),
+    log: (level, message, context) => core.log(level, message, context),
+  });
+  // Feature-detect: kernels without the send seams simply never get providers.
+  const sendProviders = createWhatsAppSendProviders({ emitter, policy: { ignoreGroups, allowlist } });
+  if (typeof core.registerTargetedSendProvider === 'function') {
+    core.registerTargetedSendProvider(channelId, sendProviders.targeted);
+  }
+  if (typeof core.registerConversationSendProvider === 'function') {
+    core.registerConversationSendProvider(channelId, sendProviders.conversation);
+  }
+
+  const roster = createWhatsAppRosterProvider({
+    isConnected: () => conn.isConnected(),
+    ownIdentity: () => conn.ownIdentity(),
+    groupMetadata: (groupJid) => conn.groupMetadata(groupJid),
+  });
+  // Feature-detect: kernels that predate the roster seam simply never get a
+  // provider and keep treating every conversation as direct.
+  if (typeof core.registerRosterProvider === 'function') {
+    core.registerRosterProvider(channelId, roster);
+  } else {
+    core.log('warn', 'kernel has no registerRosterProvider — groups cannot be audience-checked');
+  }
+
   conn = new WhatsAppConnection({
     channelId,
     memory: ctx.memory,
@@ -58,7 +119,20 @@ export async function activate(ctx: PluginContext, core: CoreApi): Promise<Chann
     deviceName,
     state,
     policy: { ignoreGroups, allowlist },
-    onMessage: (turn) => handleTurn(ctx, agent, core, conn, turn),
+    // The kernel gets the message first: a typed answer to a poll becomes its
+    // card_answer and starts no turn; where it reads everything for a
+    // facilitation the engine drives and the channel starts none either.
+    onMessage: async (turn: IncomingTurn, addressing) => {
+      await handleAddressed(messageEvents, turn, addressing, () => turns.handle(turn));
+    },
+    onObserved: (turn) => void messageEvents.created(turn, undefined),
+    onRefused: (turn, reason) => turns.refuse(turn, reason),
+    // A group is answered only when its members are readable. `partial` goes
+    // on to the kernel, whose audience floor fails closed on it.
+    canAnswerGroup: async (groupJid) =>
+      rosterStatusOf((await roster.getRoster(groupJid, { fresh: true })) ?? { partial: true, status: 'unknown' }) !==
+      'unknown',
+    onGroupMembershipChanged: (groupJid) => roster.invalidate(groupJid),
   });
 
   // QR / status admin UI. web-ui renders this as an iframe (manifest
@@ -89,112 +163,36 @@ export async function activate(ctx: PluginContext, core: CoreApi): Promise<Chann
     async close() {
       disposeRoutes();
       await conn.close();
+      await speakerHistory.flush();
     },
   };
 }
 
-/** Drive one orchestrator turn and ship the rendered answer back to WhatsApp. */
-async function handleTurn(
-  ctx: PluginContext,
-  defaultAgent: ChatAgent,
+/**
+ * The `chatAgent@1` singleton: the answer path of a host WITHOUT a channel
+ * resolver only. With a resolver it is never read (it refuses every non-canvas
+ * turn there), so no resolver result is ever overridden by it.
+ */
+function resolveSingleAgent(ctx: PluginContext): ChatAgent | undefined {
+  return getChatAgent(ctx);
+}
+
+/**
+ * What the kernel wants of a conversation: `conversationDelivery` where it has
+ * it, else `isAllMessagesSubscribed` (all or none); `undefined` when neither.
+ */
+function deliveryModeOf(
   core: CoreApi,
-  conn: WhatsAppConnection,
-  turn: IncomingTurn,
-): Promise<void> {
-  // US7 — route to the Agent the operator bound to this WhatsApp chat
-  // (per-conversation), else the platform fallback Agent, else the default.
-  const agent = resolveAgentForTurn(ctx, 'whatsapp', [turn.conversationId], defaultAgent);
-  try {
-    const answer = await agent.chat({
-      userMessage: turn.text,
-      sessionScope: `whatsapp:${turn.conversationId}`,
-      userId: turn.userRef.id,
-    });
-    if (isNoReply(answer)) {
-      logNoReplyDrop(turn.channelId, { conversationId: turn.conversationId });
-      return;
-    }
-    const text = renderAnswer(answer);
-    if (text.trim().length === 0) return;
-    await conn.sendText(turn.conversationId, text);
-  } catch (err) {
-    core.log('error', 'failed to handle WhatsApp turn', {
-      error: (err as Error).message,
-      conversationId: turn.conversationId,
-    });
-    try {
-      await conn.sendText(
-        turn.conversationId,
-        '⚠️ Entschuldigung, dabei ist ein Fehler aufgetreten. Bitte versuche es erneut.',
-      );
-    } catch {
-      /* original error already logged — don't mask it with a send failure */
-    }
+): ((conversationId: string, channelKey: string) => DeliveryMode) | undefined {
+  if (typeof core.conversationDelivery === 'function') {
+    return (conversationId, channelKey) =>
+      core.conversationDelivery?.(WHATSAPP_CHANNEL_TYPE, conversationId, channelKey) ?? 'none';
   }
-}
-
-/**
- * Resolve the orchestrator's {@link ChatAgent}. Prefers the SDK helper
- * `getChatAgent(ctx)` (the blessed, typed path); falls back to the raw
- * service-registry lookup so the plugin also runs on a host whose
- * `@omadia/channel-sdk` predates the helper (the `chatAgent` service itself
- * has always been there). Accessed via the namespace so a missing export is
- * just `undefined` at runtime rather than a module-load error.
- */
-function resolveChatAgent(ctx: PluginContext): ChatAgent | undefined {
-  const helper = (channelSdk as { getChatAgent?: (c: PluginContext) => ChatAgent | undefined })
-    .getChatAgent;
-  if (helper) return helper(ctx);
-  return ctx.services.get<{ agent: ChatAgent }>('chatAgent')?.agent;
-}
-
-/**
- * Structural view of the kernel's `channelResolver@1` — the per-binding router
- * published by the multi-orchestrator runtime. Consumed directly (not via a
- * new SDK export) so this plugin keeps running on hosts whose
- * `@omadia/channel-sdk` predates the US7 helper; the service itself is what the
- * helper wraps.
- */
-interface ChannelBindingResolver {
-  resolve(
-    channelType: string,
-    channelKey: string,
-  ): { readonly decision: 'bound' | 'fallback' | 'reject'; readonly chatAgent?: ChatAgent };
-}
-
-const CHANNEL_RESOLVER_SERVICE = 'channelResolver';
-
-/**
- * US7 per-turn Agent resolution. Routes a turn to the Agent the operator bound
- * to its `(channelType, channelKey)` via `channelResolver@1`, falling back to
- * `defaultAgent` when no binding (and no platform fallback Agent) matches OR
- * the resolver is not published (single-Agent / pre-US7 host). `channelKeys`
- * are tried most-specific first: a `bound` decision wins immediately, a
- * `fallback` is remembered and used only if no key is explicitly bound.
- * Resolver errors are swallowed (default agent used) so a hiccup never drops a
- * turn. Without this, every turn reaches the shared, fully-tooled singleton
- * regardless of which Agent the channel is bound to.
- */
-function resolveAgentForTurn(
-  ctx: PluginContext,
-  channelType: string,
-  channelKeys: ReadonlyArray<string | null | undefined>,
-  defaultAgent: ChatAgent,
-): ChatAgent {
-  const resolver = ctx.services.get<ChannelBindingResolver>(CHANNEL_RESOLVER_SERVICE);
-  if (!resolver) return defaultAgent;
-  let fallback: ChatAgent | undefined;
-  try {
-    for (const key of channelKeys) {
-      if (!key) continue;
-      const decision = resolver.resolve(channelType, key);
-      if (decision.decision === 'bound' && decision.chatAgent) return decision.chatAgent;
-      if (decision.decision === 'fallback' && decision.chatAgent) fallback ??= decision.chatAgent;
-    }
-  } catch {
-    return defaultAgent;
+  if (typeof core.isAllMessagesSubscribed === 'function') {
+    return (conversationId, channelKey) =>
+      core.isAllMessagesSubscribed?.(WHATSAPP_CHANNEL_TYPE, conversationId, channelKey) ? 'all' : 'none';
   }
-  return fallback ?? defaultAgent;
+  return undefined;
 }
 
 /** Parse the comma-separated allowlist into digits-only phone numbers. */

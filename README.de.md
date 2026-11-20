@@ -22,11 +22,44 @@ omadia ist ein selbst-hostbares agentisches OS: stelle Multi-Agent-Teams aus sig
 
 ## Was es kann
 
-Verbindet WhatsApp über WhatsApp Web (Baileys) mit omadia. Es koppelt sich per QR-Code als verknüpftes Gerät, ein WhatsApp-Business-API-Konto ist also nicht nötig. Einzelchats werden in den omadia-Orchestrator geleitet, und die Antwort kommt im selben Chat zurück. Du kannst Gruppen ignorieren und den Zugriff mit einer Nummern-Allowlist begrenzen.
+Verbindet WhatsApp über WhatsApp Web (Baileys) mit omadia. Es koppelt sich per QR-Code als verknüpftes Gerät, ein WhatsApp-Business-API-Konto ist also nicht nötig. Einzelchats werden in den omadia-Orchestrator geleitet, und die Antwort kommt im selben Chat zurück. Du kannst Gruppen ignorieren und den Zugriff mit einer Nummern-Allowlist begrenzen. Der Chat liest sich wie ein Gespräch mit einer Kollegin: Klartext, keine Status-Reaktionen, Fußzeilen oder Buttons. Längere Arbeit zeigt den Schreibindikator und nach etwa acht Sekunden eine kurze Bestätigung.
 
 ## So funktioniert es in omadia
 
 Ein Channel-Plugin (`kind: channel`). Der omadia-Kernel aktiviert es aus der `manifest.yaml`. Das Plugin öffnet eine WhatsApp-Web-Session, leitet jeden eingehenden Chat an den Orchestrator-Chat-Agenten weiter und sendet die Antwort zurück. Es braucht zuerst einen LLM-Provider, der dem Orchestrator zugewiesen ist.
+
+## Einen Agenten ansprechen
+
+**Eine eigene Identität pro Agent wird nicht unterstützt.** Eine Installation ist eine verknüpfte WhatsApp-Nummer (eine Baileys-Session, eine QR-Kopplung), also sind alle Agenten über diese eine Nummer erreichbar. Eine eigene Nummer je Agent bräuchte eine Session je Agent: eigener Auth-State, eigene Kopplung, eigene Zuordnung von Nummer zu Agent. Das Plugin macht das nicht. Für den Betreiber hieße das außerdem eine Nummer und ein Telefon mit WhatsApp pro Agent, und jedes weitere inoffiziell verknüpfte Gerät erhöht das Risiko, dass WhatsApp es einschränkt.
+
+Stattdessen wählst du den Agenten im Chat:
+
+- `/agents` listet die Agenten, die dir in diesem Channel zur Verfügung stehen.
+- `/agent Mira` wählt Mira für dich in dieser Unterhaltung. Der omadia-Kernel speichert die Auswahl und bestätigt sie einmal mit einer Systemnachricht. Auswählbar sind nur Agenten, die der Betreiber dir in WhatsApp freigegeben hat.
+- `/agent` allein hebt deine Auswahl auf; es gilt wieder die Bindung oder der Standard-Agent.
+- Das Plugin parst die Befehle nicht. WhatsApp kennt keine nativen Bot-Befehle, der Text geht als normale Nachricht an den Agenten, den die Plattform für die Unterhaltung bestimmt hat, und dieser führt den Befehl aus.
+
+**Wo die Auswahl liegt:** `/agent` wird je Chat und Person gespeichert: der Schlüssel ist die Gruppen-JID (Gruppe) bzw. deine Telefonnummer-JID (Direktchat; die Datenschutz-ID nur, wenn WhatsApp keine Nummer verrät) zusammen mit deiner Identität. In einer Gruppe hat jede Person ihre eigene Auswahl; dieselbe Person hat in getrennten Chats getrennte Auswahlen. Ein Direktchat, den WhatsApp zeitweise über die Telefonnummer und zeitweise über die Datenschutz-ID anspricht, ist deshalb eine Auswahl. Derselbe Schlüssel ist es, den eine Kanalbindung eines Direktchats nennen muss: Direktchats per Telefonnummer-JID binden. Gesendet wird weiter an die JID, die WhatsApp verwendet hat. WhatsApp nennt keine Sprache der Person, Systemnachrichten sind deshalb deutsch, solange keine Sprache bekannt ist.
+
+Antwortet dir hier kein Agent (er ist abgeschaltet, gelöscht oder steht dir nicht zur Verfügung), bekommst du eine kurze Systemnachricht, die das sagt. Einen Ersatz-Agenten, der stattdessen antwortet, gibt es nicht.
+
+Du bist in jedem Chat dieselbe Person: Auswahl und Verfügbarkeitsregeln des Betreibers hängen an einer Identität, `user:whatsapp-phone:<Nummer>@s.whatsapp.net`. WhatsApp zeigt eine Person zunehmend nur noch über eine Datenschutz-ID (`@lid`); verrät es auch die Telefonnummer, gilt die Nummer, sodass ein Direktchat und jede Gruppe dieselbe Identität teilen. Zeigt WhatsApp nur die Datenschutz-ID, ist diese ID die Identität (und deine Auswahl gilt nicht in einem Chat, in dem deine Nummer sichtbar ist).
+
+Wer spricht: Bei einem Agenten in einer Unterhaltung gibt es keine Namenszeile. Sprechen mehrere Agenten in einer Unterhaltung, oder ist es die erste Antwort nach einem Wechsel, beginnt die Antwort mit einer schlichten Namenszeile (`Mira: ...`). Der Beitrag einer Kollegin zu einer Antwort steht als einfache Zuordnung im Text (`Jonas: ...`), und Nachrichten des Systems selbst (zum Beispiel „dieser Agent steht dir nicht zur Verfügung“) sind Klartext ohne Agentennamen.
+
+## Umfragen und Fragen
+
+Ein Agent kann dir eine Umfrage oder Frage stellen (zum Beispiel in einer moderierten Diskussion). WhatsApp hat hier keine native Umfrage oder Karte, deshalb schickt der omadia-Kernel sie als schlichten, nummerierten Text in einer normalen Nachricht und merkt sich die offene Frage. Du antwortest durch Tippen: die Nummer einer Option (`2`), mehrere Nummern (`1,3`), eine Rangfolge (`2,1,3`), `ja` / `nein`, eine Zahl oder ein Datum (`2026-12-01`). In einer Gruppe antwortest du auf die Fragenachricht (oder @erwähnst den Bot); im Direktchat reicht eine Nachricht an den Bot, solange eine Frage offen ist. Der Kernel liest die Antwort und macht daraus dieselbe strukturierte Antwort wie bei einem Klick auf eine Karte, und der Agent antwortet darauf nicht zusätzlich (das Plugin fragt den Kernel, bevor es einen Turn startet, höchstens 1,5 s lang); eine Nachricht, die nicht antwortet, bleibt eine normale Nachricht. Das Plugin hat dafür keinen eigenen Karten-Code: Es meldet die Id der gesendeten Nachricht und sagt dem Kernel zu jeder eingehenden Nachricht, welche Nachricht sie zitiert (`replyToMessageId`) und ob sie den Bot anspricht (`addressedToBot`). Liest der Kernel in einer Gruppe alle Nachrichten für eine Moderation, meldet das Plugin auch nicht adressierte Gruppennachrichten und startet für adressierte keinen eigenen Turn.
+
+Dafür registriert das Plugin einen Targeted- und einen Conversation-Send-Provider. Sie deklarieren nichts Besonderes: Nachrichten gehen als `system`-Text raus, und das Plugin sendet nie als eigene Identität eines anderen Agenten (eine Nummer).
+
+## Gruppen
+
+Gruppen werden standardmäßig ignoriert (**Ignore groups** an). Ist das aus:
+
+- Der Bot antwortet nur, wenn er @erwähnt wird, jemand auf eine seiner Nachrichten antwortet oder eine Nachricht mit `/agent` oder `/agents` beginnt. Er antwortet nie auf jede Nachricht.
+- Er antwortet nur, solange WhatsApp ihm die Mitgliederliste der Gruppe liefert. Sonst sagt er das einmal (höchstens alle 10 Minuten je Gruppe) und bleibt still. Das Plugin meldet dem Kernel die Mitgliederliste (`complete`, `partial` oder `unknown`); der Kernel entscheidet damit, was eine Antwort vor diesem Publikum enthalten darf.
+- WhatsApp kann Mitglieder über eine Datenschutz-ID (`@lid`) statt der Telefonnummer ansprechen. Die Liste trägt dann diese ID, mit der Telefonnummer als `externalId`, wenn WhatsApp sie liefert.
 
 ## Installation
 
@@ -48,11 +81,11 @@ Weise dem Orchestrator zuerst einen LLM-Provider zu, sonst hat der Chat-Agent ke
 
 ```bash
 npm install
-npm run build   # tsc, schreibt dist/
-npm test        # prüft manifest.yaml gegen die Core-Invarianten
+npm run build   # bündelt dist/plugin.js und das Upload-ZIP
+npm test        # node:test-Suiten (Sprecher, Klartext, Dekorationen, Gruppen)
 ```
 
-`@omadia/plugin-api` stellt der omadia-Host zur Laufzeit bereit (optionale Peer-Dep). Verlinke es aus einem lokalen omadia-Checkout zum Bauen. Aufbau siehe [byte5ai/omadia](https://github.com/byte5ai/omadia).
+`@omadia/channel-sdk` und `@omadia/plugin-api` stellt der omadia-Host zur Laufzeit bereit. Zum Typprüfen und Testen baust du sie in einem lokalen omadia-Checkout und zeigst die Tests darauf: `OMADIA_CHANNEL_SDK_DIST` und `OMADIA_PLUGIN_API_DIST` (Standard: `../middleware/packages/harness-channel-sdk/dist/index.js` und `../middleware/packages/plugin-api/dist/index.js`). Aufbau siehe [byte5ai/omadia](https://github.com/byte5ai/omadia).
 
 ## Lizenz
 
