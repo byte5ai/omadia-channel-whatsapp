@@ -2,6 +2,7 @@ import {
   admitDecorations,
   renderPlainAnswer,
   type DecorationRefusal,
+  type PendingInteractiveStore,
   type SemanticAnswer,
   type SpeakerHistoryStore,
 } from '@omadia/channel-sdk';
@@ -54,8 +55,14 @@ export function renderWhatsAppText(
   answer: SemanticAnswer,
   conversationKey: string,
   speakerHistory: SpeakerHistoryStore,
+  pendingInteractives?: PendingInteractiveStore,
 ): string {
-  const plain = renderPlainAnswer(answer, { nativeIdentity: false, conversationKey, speakerHistory });
+  const plain = renderPlainAnswer(answer, {
+    nativeIdentity: false,
+    conversationKey,
+    speakerHistory,
+    ...(pendingInteractives ? { pendingInteractives } : {}),
+  });
   // A system notice is its own text; attachments belong to agent answers.
   const links = answer.speaker?.kind === 'system' ? '' : attachmentLines(answer.attachments);
   return mdToWhatsApp([plain, links].filter((part) => part.trim().length > 0).join('\n\n')).trim();
@@ -65,6 +72,12 @@ export interface EmitterDeps {
   /** The one raw send primitive (`WhatsAppConnection.sendText`); resolves to the WhatsApp message id when known. */
   readonly sendText: (jid: string, text: string) => Promise<string | undefined | void>;
   readonly speakerHistory: SpeakerHistoryStore;
+  /**
+   * Where a choice/topic/slots question shown as numbered text is kept, so the
+   * turn handler can turn the person's typed "2" into the option it names
+   * (spec 2042 §6 criterion 30).
+   */
+  readonly pendingInteractives?: PendingInteractiveStore;
   readonly onDecorationRefused?: (refusal: DecorationRefusal) => void;
 }
 
@@ -93,7 +106,7 @@ export function createAnswerEmitter(deps: EmitterDeps): AnswerEmitter {
   return {
     async emit(jid, answer) {
       if (!answer.speaker) throw new MissingSpeakerError();
-      const text = renderWhatsAppText(answer, jid, deps.speakerHistory);
+      const text = renderWhatsAppText(answer, jid, deps.speakerHistory, deps.pendingInteractives);
       if (text.length === 0) return undefined;
       return (await deps.sendText(jid, text)) ?? undefined;
     },

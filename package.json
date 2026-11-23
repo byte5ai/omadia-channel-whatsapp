@@ -1,10 +1,10 @@
 {
   "name": "@omadia/channel-whatsapp",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "main": "dist/plugin.js",
-  "description": "WhatsApp channel for the Omadia harness \u2014 WhatsApp Web (Baileys) with QR linked-device pairing. Routes WhatsApp chats into the Omadia orchestrator.",
+  "description": "WhatsApp channel for the Omadia harness \u2014 WhatsApp Web (Baileys) with QR linked-device pairing. Routes WhatsApp chats to your agents.",
   "license": "MIT",
   "homepage": "https://github.com/byte5ai/omadia-channel-whatsapp",
   "repository": {

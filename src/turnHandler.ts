@@ -1,11 +1,13 @@
 import {
   isNoReply,
   logNoReplyDrop,
+  resolveTypedInteractiveReply,
   runPacedTurn,
   type ChannelPaceProfile,
   type IncomingTurn,
   type LogLevel,
   type PaceClock,
+  type PendingInteractiveStore,
   type SemanticAnswer,
 } from '@omadia/channel-sdk';
 
@@ -40,6 +42,8 @@ export interface TurnHandlerDeps {
   /** Who answers this turn: the platform's decision for the conversation and the sender's principal. */
   readonly route: (turn: IncomingTurn, principal: string) => TurnRoute;
   readonly emitter: AnswerEmitter;
+  /** The same store the emitter records into: a typed "2" answers the question last shown (criterion 30). */
+  readonly pendingInteractives?: PendingInteractiveStore;
   readonly log: (level: LogLevel, message: string, context?: Record<string, unknown>) => void;
   /** Show the "composing" presence in a chat. Presence, not a message. */
   readonly sendTyping?: (jid: string) => Promise<void>;
@@ -109,10 +113,13 @@ export function createTurnHandler(deps: TurnHandlerDeps): TurnHandler {
         }
         // The agent's own speaker is known up front only for a bound turn.
         const ackSpeaker = route.decision === 'bound' ? route.speaker : undefined;
+        const userMessage = deps.pendingInteractives
+          ? resolveTypedInteractiveReply(deps.pendingInteractives, jid, turn.text).text
+          : turn.text;
         const { result: answer } = await runPacedTurn(
           () =>
             agent.chat({
-              userMessage: turn.text,
+              userMessage,
               sessionScope: sessionScopeOf(jid),
               userId: turn.userRef.id,
               origin,

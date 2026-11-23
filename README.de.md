@@ -22,11 +22,11 @@ omadia ist ein selbst-hostbares agentisches OS: stelle Multi-Agent-Teams aus sig
 
 ## Was es kann
 
-Verbindet WhatsApp über WhatsApp Web (Baileys) mit omadia. Es koppelt sich per QR-Code als verknüpftes Gerät, ein WhatsApp-Business-API-Konto ist also nicht nötig. Einzelchats werden in den omadia-Orchestrator geleitet, und die Antwort kommt im selben Chat zurück. Du kannst Gruppen ignorieren und den Zugriff mit einer Nummern-Allowlist begrenzen. Der Chat liest sich wie ein Gespräch mit einer Kollegin: Klartext, keine Status-Reaktionen, Fußzeilen oder Buttons. Längere Arbeit zeigt den Schreibindikator und nach etwa acht Sekunden eine kurze Bestätigung.
+Verbindet WhatsApp über WhatsApp Web (Baileys) mit omadia. Es koppelt sich per QR-Code als verknüpftes Gerät, ein WhatsApp-Business-API-Konto ist also nicht nötig. Einzelchats werden an deine Agenten geleitet, und die Antwort kommt im selben Chat zurück. Du kannst Gruppen ignorieren und den Zugriff mit einer Nummern-Allowlist begrenzen. Der Chat liest sich wie ein Gespräch mit einer Kollegin: Klartext, keine Status-Reaktionen, Fußzeilen oder Buttons. Längere Arbeit zeigt den Schreibindikator und nach etwa acht Sekunden eine kurze Bestätigung.
 
 ## So funktioniert es in omadia
 
-Ein Channel-Plugin (`kind: channel`). Der omadia-Kernel aktiviert es aus der `manifest.yaml`. Das Plugin öffnet eine WhatsApp-Web-Session, leitet jeden eingehenden Chat an den Orchestrator-Chat-Agenten weiter und sendet die Antwort zurück. Es braucht zuerst einen LLM-Provider, der dem Orchestrator zugewiesen ist.
+Ein Channel-Plugin (`kind: channel`). Der omadia-Kernel aktiviert es aus der `manifest.yaml`. Das Plugin öffnet eine WhatsApp-Web-Session, leitet jeden eingehenden Chat an die Agent-Runtime weiter und sendet die Antwort zurück. Es braucht zuerst einen LLM-Provider, der der Agent-Runtime zugewiesen ist.
 
 ## Einen Agenten ansprechen
 
@@ -67,7 +67,7 @@ Gruppen werden standardmäßig ignoriert (**Ignore groups** an). Ist das aus:
 2. Es gibt keinen API-Key. Fülle die unten stehenden Setup-Felder aus und starte das Plugin.
 3. Scanne beim ersten Start den QR-Code mit WhatsApp auf dem Handy (Verknüpfte Geräte), um zu koppeln.
 
-Weise dem Orchestrator zuerst einen LLM-Provider zu, sonst hat der Chat-Agent kein Modell für die Antwort.
+Weise der Agent-Runtime zuerst ein Modell zu, sonst hat der Chat-Agent kein Modell für die Antwort.
 
 ## Konfiguration
 
