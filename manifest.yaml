@@ -28,7 +28,9 @@ identity:
     - "communication"
 
 compat:
-  core: ">=1.75.0 <2.0"                    # placeholder for the planned release; the parent session sets the final range
+  # 0.3.0 needs 1.87.0: typed replies to answer elements use the channel-sdk
+  # 0.3.13 PendingInteractiveStore (round G4, criterion 30).
+  core: ">=1.87.0 <2.0"
   node: ">=20"
 
 depends_on: []
