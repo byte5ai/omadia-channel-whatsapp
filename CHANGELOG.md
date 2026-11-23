@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.0
+
+User-visible texts no longer say "Orchestrator" (spec 2042 §6 criterion 12, `docs/terminology.md`): the manifest description, the package description, the README and the admin page now speak of your agents and the agent runtime.
+
+- A typed "2" to a numbered `choice`/`topic`/`slots` question reaches the agent as the option it names, using the channel SDK's `PendingInteractiveStore` / `resolveTypedInteractiveReply` (criterion 30). **Needs the kernel release that ships these SDK exports** (`compat.core` is set by the release).
+
 ## 0.2.1
 
 - The manifest now declares `raw.githubusercontent.com` as an outbound host.

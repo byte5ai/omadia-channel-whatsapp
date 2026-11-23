@@ -22,11 +22,11 @@ omadia is a self-hostable agentic OS: compose multi-agent teams from signed plug
 
 ## What it does
 
-Connects WhatsApp to omadia over WhatsApp Web (Baileys). It pairs as a linked device via QR code, so no WhatsApp Business API account is required. One-to-one chats are routed into the omadia orchestrator, and the reply comes back in the same chat. You can ignore groups and limit access with a number allowlist. The chat reads like a conversation with a colleague: plain text, no status reactions, footers or buttons. Long work shows the typing indicator and, after about eight seconds, one short acknowledgement.
+Connects WhatsApp to omadia over WhatsApp Web (Baileys). It pairs as a linked device via QR code, so no WhatsApp Business API account is required. One-to-one chats are routed to your agents, and the reply comes back in the same chat. You can ignore groups and limit access with a number allowlist. The chat reads like a conversation with a colleague: plain text, no status reactions, footers or buttons. Long work shows the typing indicator and, after about eight seconds, one short acknowledgement.
 
 ## How it works in omadia
 
-A channel plugin (`kind: channel`). The omadia kernel activates it from `manifest.yaml`. The plugin opens a WhatsApp Web session, forwards each inbound chat to the orchestrator chat agent, and sends the response back. It needs an LLM provider assigned to the orchestrator first.
+A channel plugin (`kind: channel`). The omadia kernel activates it from `manifest.yaml`. The plugin opens a WhatsApp Web session, forwards each inbound chat to the agent runtime, and sends the response back. It needs an LLM provider assigned to the agent runtime first.
 
 ## Addressing an agent
 
@@ -67,7 +67,7 @@ Groups are ignored by default (**Ignore groups** on). With it off:
 2. There is no API key. Fill the setup fields below, then start the plugin.
 3. On first start, scan the QR code with WhatsApp on the phone (Linked Devices) to pair.
 
-Assign an LLM provider to the orchestrator first, otherwise the chat agent has no model to reply with.
+Assign a model to the agent runtime first, otherwise the chat agent has no model to reply with.
 
 ## Configuration
 

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { InMemorySpeakerHistoryStore, paceAckText, type IncomingTurn } from '@omadia/channel-sdk';
+import { InMemoryPendingInteractiveStore, InMemorySpeakerHistoryStore, paceAckText, type IncomingTurn, type SemanticAnswer } from '@omadia/channel-sdk';
 
 import { createAnswerEmitter } from '../src/emit.js';
 import { TURN_FAILED_TEXT, WHATSAPP_PACE_PROFILE, createTurnHandler } from '../src/turnHandler.js';
@@ -102,5 +102,58 @@ describe('pace (spec 5.8): typing, one acknowledgement, no chatter', () => {
     assert.equal(sent.length, 2);
     assert.ok(sent[0]!.includes(paceAckText(undefined)));
     assert.equal(sent[1], TURN_FAILED_TEXT, 'the failure is the system\'s, never the agent\'s');
+  });
+});
+
+describe('a typed "2" to a numbered question (spec 2042 criterion 30)', () => {
+  it('reaches the agent as the option it names, once; a topic and a slot are picked the same way', async () => {
+    const pendingInteractives = new InMemoryPendingInteractiveStore();
+    const sent: string[] = [];
+    const emitter = createAnswerEmitter({
+      sendText: async (_j, t) => void sent.push(t),
+      speakerHistory: new InMemorySpeakerHistoryStore(),
+      pendingInteractives,
+    });
+    const messages: string[] = [];
+    const answers: SemanticAnswer[] = [
+      {
+        text: 'Welche Variante?',
+        speaker: mira,
+        interactive: { kind: 'choice', question: 'Welche?', options: [{ label: 'A', value: 'variante-a' }, { label: 'B', value: 'variante-b' }] },
+      } as SemanticAnswer,
+      { text: 'Gut.', speaker: mira } as SemanticAnswer,
+      {
+        text: 'Welche Firma?',
+        speaker: mira,
+        interactive: { kind: 'topic', question: 'Firma?', topics: [{ label: 'ACME GmbH', value: 'acme' }, { label: 'ACME AG', value: 'acme-ag' }] },
+      } as SemanticAnswer,
+      { text: 'Ok.', speaker: mira } as SemanticAnswer,
+      {
+        text: 'Wann?',
+        speaker: mira,
+        interactive: { kind: 'slots', question: 'Termin?', slots: [{ slotId: 's1', start: '2026-12-01T09:00:00Z', end: '2026-12-01T09:30:00Z', timeZone: 'Europe/Berlin', label: 'Di 10:00', confidence: 0.9 }] },
+      } as SemanticAnswer,
+      { text: 'Gebucht.', speaker: mira } as SemanticAnswer,
+    ];
+    const agent = {
+      chat: async (input: { userMessage: string }) => {
+        messages.push(input.userMessage);
+        return answers.shift() as SemanticAnswer;
+      },
+    };
+    const handler = createTurnHandler({ route: boundRoute(agent as never, mira), emitter, pendingInteractives, log: () => {} });
+    const say = (text: string) => handler.handle({ ...turn, text });
+
+    await say('hilf mir');
+    assert.match(sent[0] ?? '', /1\) A\n2\) B/);
+    await say('2');
+    await say('2'); // the question is spent: just a "2" (the agent answers with a topic question)
+    await say('2');
+    await say('noch was'); // the agent answers with a slot question
+    await say('1');
+    assert.deepEqual(messages.slice(0, 3), ['hilf mir', 'variante-b', '2']);
+    assert.equal(messages[3], 'acme-ag');
+    assert.equal(messages[4], 'noch was');
+    assert.match(messages[5] ?? '', /slotId="s1"/);
   });
 });

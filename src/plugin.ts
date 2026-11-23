@@ -2,6 +2,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
+  InMemoryPendingInteractiveStore,
   getChatAgent,
   resolveChannelRoute,
   rosterStatusOf,
@@ -56,9 +57,11 @@ export async function activate(ctx: PluginContext, core: CoreApi): Promise<Chann
   );
   await speakerHistory.load();
 
+  const pendingInteractives = new InMemoryPendingInteractiveStore();
   const emitter = createAnswerEmitter({
     sendText: (jid, text) => conn.sendText(jid, text),
     speakerHistory,
+    pendingInteractives,
     onDecorationRefused: (refusal) =>
       core.log('error', 'WhatsApp decoration refused by the registry', { ...refusal }),
   });
@@ -71,6 +74,7 @@ export async function activate(ctx: PluginContext, core: CoreApi): Promise<Chann
       singleAgent: () => resolveSingleAgent(ctx),
     }),
     emitter,
+    pendingInteractives,
     sendTyping: (jid) => conn.sendTyping(jid),
     log: (level, message, context) => core.log(level, message, context),
   });
