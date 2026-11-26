@@ -11,7 +11,7 @@ import {
   type CoreApi,
   type IncomingTurn,
 } from '@omadia/channel-sdk';
-import type { PluginContext } from '@omadia/plugin-api';
+import type { PluginContext, RoutinesIntegration } from '@omadia/plugin-api';
 
 import { createAdminRouter } from './adminRouter.js';
 import { createMessageEvents, handleAddressed, whatsAppInstallationKey, type DeliveryMode } from './conversationMessages.js';
@@ -23,6 +23,12 @@ import { createTurnRouter } from './routing.js';
 import { createChannelState } from './state.js';
 import { createTurnHandler } from './turnHandler.js';
 import { WhatsAppConnection } from './whatsappConnection.js';
+import {
+  ROUTINES_INTEGRATION_SERVICE,
+  WHATSAPP_ROUTINE_CHANNEL,
+  createWhatsAppProactiveSend,
+  createWhatsAppRoutineTurn,
+} from './whatsappRoutines.js';
 
 /**
  * Channel-plugin entry. The kernel's dynamic channel resolver imports this
@@ -43,6 +49,9 @@ export async function activate(ctx: PluginContext, core: CoreApi): Promise<Chann
   const allowlist = parseAllowlist(ctx.config.get<string>('allowlist') ?? '');
 
   const state = createChannelState();
+  // Triggers and routines (spec 2042 §5.12, omadia#1086): published by the
+  // kernel only with a database. Absent = agents set no triggers or routines here.
+  const routines = ctx.services.get<RoutinesIntegration>(ROUTINES_INTEGRATION_SERVICE);
 
   // `let conn!` so the closures below can reference the instance they are
   // attached to; they only fire once messages arrive (long after
@@ -77,6 +86,7 @@ export async function activate(ctx: PluginContext, core: CoreApi): Promise<Chann
     pendingInteractives,
     sendTyping: (jid) => conn.sendTyping(jid),
     log: (level, message, context) => core.log(level, message, context),
+    ...(routines ? { routineTurn: createWhatsAppRoutineTurn(routines, channelId) } : {}),
   });
 
   // Polls and question cards: the kernel posts them as numbered text through
@@ -157,6 +167,15 @@ export async function activate(ctx: PluginContext, core: CoreApi): Promise<Chann
   // Non-blocking — QR + scan can far exceed the 10s activate budget.
   conn.start();
 
+  // Trigger and routine deliveries go to the chat they were set in, through
+  // the single emitter and under the same policy as every other send.
+  // Registered once the connection exists, removed again on close.
+  const disposeProactiveSend = routines?.publishProactiveSend(
+    WHATSAPP_ROUTINE_CHANNEL,
+    createWhatsAppProactiveSend({ emitter, policy: { ignoreGroups, allowlist } }),
+  );
+  if (routines) core.log('info', 'WhatsApp proactive send registered (triggers and routines deliver to their chat)');
+
   core.log('info', 'WhatsApp channel activated — open the admin UI to scan the pairing QR', {
     adminUi: '/api/whatsapp-channel/admin/index.html',
     ignoreGroups,
@@ -165,6 +184,7 @@ export async function activate(ctx: PluginContext, core: CoreApi): Promise<Chann
 
   return {
     async close() {
+      if (typeof disposeProactiveSend === 'function') disposeProactiveSend();
       disposeRoutes();
       await conn.close();
       await speakerHistory.flush();

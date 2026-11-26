@@ -53,6 +53,10 @@ An agent can ask you a poll or a question (for example in a facilitated discussi
 
 The plugin registers a targeted and a conversation send provider for this. They declare nothing special: messages go out as `system` text, and the plugin never sends as another agent's own identity (one number).
 
+## Reminders and routines
+
+An agent can set a reminder, a trigger or a recurring routine for you in a WhatsApp chat ("remind me tomorrow at nine"). The plugin opens the kernel's routines scope on every turn, so the agent is offered these tools there, and the delivery later goes to the same chat: an agent's message with its name line where one is needed, a message from the system (for example an approval request) as plain text. A run with nothing to report sends nothing. A chat the operator's settings no longer allow (groups ignored, a number outside the allowlist) receives nothing; the run fails instead. Needs a kernel with a database (`routinesIntegration`); without it agents set no reminders here.
+
 ## Groups
 
 Groups are ignored by default (**Ignore groups** on). With it off:

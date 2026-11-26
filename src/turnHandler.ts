@@ -15,6 +15,7 @@ import type { AnswerEmitter } from './emit.js';
 import { systemAnswer } from './emit.js';
 import { buildTurnOrigin, messageIdOf, routePrincipalOf, sessionScopeOf } from './inbound.js';
 import { routeLocaleOf, type TurnRoute } from './routing.js';
+import type { WhatsAppRoutineTurn } from './whatsappRoutines.js';
 
 /** Why the connection did not hand a turn to an agent. */
 export type TurnRefusal = 'group_roster_unavailable';
@@ -48,6 +49,11 @@ export interface TurnHandlerDeps {
   /** Show the "composing" presence in a chat. Presence, not a message. */
   readonly sendTyping?: (jid: string) => Promise<void>;
   readonly pace?: ChannelPaceProfile;
+  /**
+   * Opens the kernel's routines scope for one turn (triggers, `manage_routine`).
+   * Absent when the kernel publishes no `routinesIntegration`: turns run as before.
+   */
+  readonly routineTurn?: WhatsAppRoutineTurn;
   /** Timer seam for tests. */
   readonly clock?: PaceClock;
   readonly now?: () => number;
@@ -116,14 +122,14 @@ export function createTurnHandler(deps: TurnHandlerDeps): TurnHandler {
         const userMessage = deps.pendingInteractives
           ? resolveTypedInteractiveReply(deps.pendingInteractives, jid, turn.text).text
           : turn.text;
+        const userId = turn.userRef.id;
+        const chat = () => agent.chat({ userMessage, sessionScope: sessionScopeOf(jid), userId, origin });
+        // The routines scope wraps the whole turn: who asks, and where a
+        // trigger or routine the agent sets now delivers later.
+        const routineTurn = deps.routineTurn;
+        const runTurn = routineTurn && userId ? () => routineTurn({ userId, jid })(chat) : chat;
         const { result: answer } = await runPacedTurn(
-          () =>
-            agent.chat({
-              userMessage,
-              sessionScope: sessionScopeOf(jid),
-              userId: turn.userRef.id,
-              origin,
-            }),
+          runTurn,
           deps.pace ?? WHATSAPP_PACE_PROFILE,
           {
             ...(deps.sendTyping ? { sendTyping: () => deps.sendTyping?.(jid) } : {}),

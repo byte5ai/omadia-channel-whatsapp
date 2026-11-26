@@ -93,6 +93,35 @@ function isAllowedRecipient(jid: string, policy: SendPolicy): boolean {
   return jid.endsWith('@s.whatsapp.net') && policy.allowlist.has(jidToPhone(jid));
 }
 
+/** Why a conversation may not be posted to under the operator's policy. */
+export interface ConversationRefusal {
+  readonly code: 'no_binding' | 'not_permitted';
+  readonly message: string;
+}
+
+/**
+ * The JID a conversation send goes to, or why it may not go out: not a WhatsApp
+ * chat, a group while the operator keeps the bot out of groups, or a person the
+ * allowlist does not name. Shared by `sendToConversation` and the routines'
+ * proactive send, so both refuse the same conversations.
+ */
+export function conversationTarget(
+  conversationId: string,
+  policy: SendPolicy,
+): { readonly jid: string } | { readonly refusal: ConversationRefusal } {
+  const jid = conversationId.trim().toLowerCase();
+  if (!isGroupJid(jid) && !isUserJid(jid)) {
+    return { refusal: { code: 'no_binding', message: `'${conversationId}' is not a WhatsApp conversation id` } };
+  }
+  if (isGroupJid(jid) && policy.ignoreGroups) {
+    return { refusal: { code: 'not_permitted', message: 'the operator keeps this bot out of groups (ignore_groups)' } };
+  }
+  if (!isGroupJid(jid) && !isAllowedRecipient(jid, policy)) {
+    return { refusal: { code: 'not_permitted', message: 'the operator\'s allowlist does not include this number' } };
+  }
+  return { jid };
+}
+
 export function createWhatsAppSendProviders(deps: WhatsAppSendProviderDeps): {
   readonly targeted: TargetedSendProvider;
   readonly conversation: ConversationSendProvider;
@@ -122,17 +151,9 @@ export function createWhatsAppSendProviders(deps: WhatsAppSendProviderDeps): {
       supports,
       async sendToConversation(conversationId, message, opts) {
         if (opts?.asChannelKey !== undefined) return unreachable('not_permitted', NO_NAMED_IDENTITY);
-        const jid = conversationId.trim().toLowerCase();
-        if (!isGroupJid(jid) && !isUserJid(jid)) {
-          return unreachable('no_binding', `'${conversationId}' is not a WhatsApp conversation id`);
-        }
-        if (isGroupJid(jid) && deps.policy.ignoreGroups) {
-          return unreachable('not_permitted', 'the operator keeps this bot out of groups (ignore_groups)');
-        }
-        if (!isGroupJid(jid) && !isAllowedRecipient(jid, deps.policy)) {
-          return unreachable('not_permitted', 'the operator\'s allowlist does not include this number');
-        }
-        return deliver(deps, jid, message);
+        const target = conversationTarget(conversationId, deps.policy);
+        if ('refusal' in target) return unreachable(target.refusal.code, target.refusal.message);
+        return deliver(deps, target.jid, message);
       },
     },
   };
