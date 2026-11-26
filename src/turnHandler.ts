@@ -125,8 +125,9 @@ export function createTurnHandler(deps: TurnHandlerDeps): TurnHandler {
         const userId = turn.userRef.id;
         const chat = () => agent.chat({ userMessage, sessionScope: sessionScopeOf(jid), userId, origin });
         // The routines scope wraps the whole turn: who asks, and where a
-        // trigger or routine the agent sets now delivers later.
-        const routineTurn = deps.routineTurn;
+        // trigger or routine the agent sets now delivers later. Only a bound
+        // turn: on a reject nobody answers, so nothing may be set either.
+        const routineTurn = route.decision === 'bound' ? deps.routineTurn : undefined;
         const runTurn = routineTurn && userId ? () => routineTurn({ userId, jid })(chat) : chat;
         const { result: answer } = await runPacedTurn(
           runTurn,

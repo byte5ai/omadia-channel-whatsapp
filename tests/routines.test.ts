@@ -106,6 +106,25 @@ describe('routines scope per turn', () => {
     assert.equal(sent.length, 1);
   });
 
+  it('a rejected turn opens no scope: nobody answers, so nothing may be set', async () => {
+    const opened: unknown[] = [];
+    const agent = fakeAgent([{ text: 'Kein Agent.', speaker: { kind: 'system' } }]);
+    const { emitter, sent } = recordingEmitter();
+    const handler = createTurnHandler({
+      route: () => ({ decision: 'reject', chatAgent: agent }),
+      emitter,
+      log: () => undefined,
+      routineTurn: (info) => {
+        opened.push(info);
+        return (fn) => fn();
+      },
+    });
+    await handler.handle(turn());
+    assert.deepEqual(opened, []);
+    assert.equal(agent.inputs.length, 1);
+    assert.equal(sent.length, 1);
+  });
+
   it('without the kernel service the turn runs exactly as before', async () => {
     const agent = fakeAgent([{ text: 'Mache ich.', speaker: mira }]);
     const { emitter, sent } = recordingEmitter();
