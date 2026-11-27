@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.0
+
+Reminders, triggers and routines on WhatsApp (byte5ai/omadia#1086, spec 2042 §5.12).
+
+- **Every turn opens the kernel's routines scope** (`routinesIntegration.beginRoutineTurn`) around `agent.chat`, on every bound turn (a rejected turn opens none: nobody answers, so nothing may be set), with the WhatsApp user id the agent sees, `channel: 'whatsapp'` and the delivery ref `{ kind: 'channel', channelId, conversationId: <chat jid> }`. Only then does the kernel offer `manage_routine` and the trigger tools here. `conductorBinding: false` for every chat (as Telegram): a group, or one linked number shared by every agent, is not where the person's Conductor reminders go.
+- **Deliveries** go out through a proactive sender registered as `whatsapp` (`publishProactiveSend`), through the single emitter: an agent's message keeps its speaker (name line where needed), a kernel text speaks as `system`, `NO_REPLY` is dropped. A ref naming a bot (`asChannelKey`, the installation is one number), a non-WhatsApp id, a group while **Ignore groups** is on, or a number outside the allowlist is refused (the run fails, nothing is sent). The policy check is shared with `sendToConversation`. The sender is removed on close.
+- `routinesIntegration@1` is declared under `optional_requires`. Without the service (no database) turns run exactly as before.
+
 ## 0.3.0
 
 User-visible texts no longer say "Orchestrator" (spec 2042 §6 criterion 12, `docs/terminology.md`): the manifest description, the package description, the README and the admin page now speak of your agents and the agent runtime.

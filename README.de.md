@@ -53,6 +53,10 @@ Ein Agent kann dir eine Umfrage oder Frage stellen (zum Beispiel in einer moderi
 
 Dafür registriert das Plugin einen Targeted- und einen Conversation-Send-Provider. Sie deklarieren nichts Besonderes: Nachrichten gehen als `system`-Text raus, und das Plugin sendet nie als eigene Identität eines anderen Agenten (eine Nummer).
 
+## Erinnerungen und Routinen
+
+Ein Agent kann dir in einem WhatsApp-Chat eine Erinnerung, einen Trigger oder eine wiederkehrende Routine einrichten („erinnere mich morgen um neun“). Das Plugin öffnet bei jedem Turn den Routinen-Scope des Kernels, damit der Agent diese Werkzeuge dort angeboten bekommt, und die Zustellung geht später in denselben Chat: die Nachricht eines Agenten mit Namenszeile, wo nötig, eine Nachricht des Systems (zum Beispiel eine Freigabeanfrage) als Klartext. Ein Lauf ohne Neuigkeiten sendet nichts. Ein Chat, den die Einstellungen des Betreibers nicht mehr erlauben (Gruppen ignoriert, Nummer außerhalb der Allowlist), bekommt nichts; der Lauf schlägt stattdessen fehl. Braucht einen Kernel mit Datenbank (`routinesIntegration`); ohne ihn richten Agenten hier keine Erinnerungen ein.
+
 ## Gruppen
 
 Gruppen werden standardmäßig ignoriert (**Ignore groups** an). Ist das aus:

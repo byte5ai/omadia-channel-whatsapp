@@ -15,7 +15,7 @@ identity:
   kind: "channel"
   domain: "whatsapp"
   name: "WhatsApp"
-  version: "0.3.0"                         # === package.json "version"
+  version: "0.4.0"                         # === package.json "version"
   description: "WhatsApp-Channel via WhatsApp Web (Baileys, QR-Linked-Device). Routet WhatsApp-Chats an deine Agenten."
   authors:
     - name: "byte5 GmbH"
@@ -198,10 +198,15 @@ permissions:
 # so there is no `agentSelection` entry. A `requires:` entry would be permanently unresolved and
 # drop the channel from the eligible set; `optional_requires:` grants the same
 # declaration the service gate asks for without a resolver edge.
+#
+# `routinesIntegration@1` (optional, kernel-side, only with a database): each
+# turn opens its routines scope (triggers, `manage_routine`) and deliveries go
+# out to the chat they were set in. Absent = agents set no triggers here.
 requires:
   - "chatAgent@^1"
 optional_requires:
   - "channelResolver@1"
+  - "routinesIntegration@1"
 provides: []
 
 # Generic admin-UI iframe surface (rendered by web-ui for any plugin that
